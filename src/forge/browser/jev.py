@@ -4,6 +4,7 @@ can reach it. Import applies the patches; `run()` is the whole API."""
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -146,15 +147,52 @@ def available() -> bool:
     return True
 
 
+STAGES = re.compile(r",?\s+(?:and )?then\s+|\s+->\s+", re.IGNORECASE)
+
+
 def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
         max_seconds: float = 90.0, attempts: int = 2) -> Result:
+    """Run a goal, one stage at a time.
+
+    A compound goal is answered badly: asked to "pick the Free plan, then set the username", it
+    picked the billing-cycle toggle and gave up, where "choose the Free plan" alone hits the
+    right card at p=1.00. Each stage gets its own completion test, and the page carries over.
+    """
+    stages = [g.strip() for g in STAGES.split(goal) if g.strip()]
+    if len(stages) < 2:
+        return _attempt(goal, url, cfg, max_seconds, attempts)
+    out = Result(False)
+    for i, stage in enumerate(stages):
+        # A later stage continues where the last one landed. Left to resolve its own start it
+        # searches the web for its own instructions ("set the username field to …").
+        start = url if i == 0 else (out.url or url)
+        r = _attempt(stage, start, cfg, max_seconds, attempts)
+        out.steps += [f"[{i + 1}/{len(stages)}] {s}" for s in r.steps]
+        out.elapsed_ms += r.elapsed_ms
+        out.decide_ms += r.decide_ms
+        out.url, out.title, out.page_text = r.url or out.url, r.title or out.title, r.page_text
+        if not r.ok:
+            out.note = f"stage {i + 1} ({stage[:40]}): {r.note}"
+            return out
+    out.ok = True
+    return out
+
+
+def _attempt(goal: str, url: str | None, cfg: config.Config | None,
+             max_seconds: float, attempts: int) -> Result:
     """A page that is still navigating when the agent attaches raises StalePage out of the loop;
     that is a timing accident, not a failure, so it is worth one more go."""
-    for i in range(attempts):
+    for _ in range(attempts):
         res = _run_once(goal, url, cfg, max_seconds)
-        if res.ok or "stalepage" not in res.note.lower():
+        if res.ok:
             return res
-        time.sleep(1.5)
+        transient = "stalepage" in res.note.lower()
+        # A heavy page (Proton's plan chooser takes seconds) can look like a dead end on the
+        # first observation: giving up in a couple of seconds with nothing done is not a verdict.
+        too_soon = len(res.steps) <= 2 and res.elapsed_ms < 15000
+        if not (transient or too_soon):
+            return res
+        time.sleep(4.0)
     return res
 
 
@@ -175,6 +213,9 @@ def _run_once(goal: str, url: str | None = None, cfg: config.Config | None = Non
     if not ws:
         return Result(False, note=f"his Chrome isn't reachable on :{cfg.browser.cdp_port}")
     os.environ["BU_CDP_WS"] = ws
+    # The address is already handled by opening it; leaving "on account.proton.me/signup" in the
+    # goal just gives the decider a phrase to match against navigation controls.
+    goal = re.sub(r"^\s*(?:on|at|in)\s+\S*(?:\.\w{2,}|/)\S*\s*,?\s*", "", goal).strip() or goal
     _patch(cfg)
     # the text helper writes field values; point it at the same model the smith speaks with
     os.environ.setdefault("TEXT_MODEL_BASE_URL", cfg.compose.fallback_base_url)
