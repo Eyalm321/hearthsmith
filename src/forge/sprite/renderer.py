@@ -560,7 +560,23 @@ class Sprite(Gtk.Window):
     def _show_reply(self, r: dict) -> bool:
         self.text, self.text_until = r["text"], time.time() + 60
         self.state, self.frame = ("alert" if r["intent"] in ("nag",) else "idle"), 0
+        if r["intent"] != "error":
+            self._speak(r["text"])
         return False
+
+    def _speak(self, text: str) -> None:
+        """He says the reply out loud while the bubble shows it. Same venv binary as `say`: this
+        process is system python for GTK, gradio_client lives in the venv."""
+        import subprocess
+        import threading
+
+        def run():
+            try:
+                subprocess.run([str(Path.home() / "dev/forge/.venv/bin/forge"), "speak", text],
+                               capture_output=True, timeout=180, check=False)
+            except Exception:  # no voice is not worth a frozen avatar
+                log.exception("speak failed")
+        threading.Thread(target=run, daemon=True).start()
 
     def on_scroll(self, _w, ev) -> bool:
         step = 0.1 if ev.direction == Gdk.ScrollDirection.UP else -0.1 if \

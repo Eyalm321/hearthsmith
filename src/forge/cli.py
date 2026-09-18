@@ -96,6 +96,9 @@ def main() -> None:
         r = route(" ".join(args.text), cfg)
         print(json.dumps({"intent": r.intent, "text": r.text, "task_id": r.task_id, "target": r.target}) if args.json
               else f"[{r.intent}] {r.text}")
+        if not args.json:  # a human in a terminal hears him; the sprite speaks for itself
+            from forge.voice import Voice
+            Voice(cfg.voice).speak(r.text)
     elif args.cmd == "speak":
         from forge.voice import Voice
         v = Voice(cfg.voice)
