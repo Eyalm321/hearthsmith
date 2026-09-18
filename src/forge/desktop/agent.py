@@ -86,7 +86,24 @@ KNOWN_SITES = {"google": "google.com", "youtube": "youtube.com", "github": "gith
                "openai": "openai.com", "anthropic": "anthropic.com", "hackernews": "news.ycombinator.com"}
 
 
+# Multi-word destinations, checked first: "google flights" is a place, not a search for the
+# word "flights" on google.com.
+NAMED_PLACES = {
+    "google flights": "https://www.google.com/travel/flights",
+    "google maps": "https://www.google.com/maps",
+    "google drive": "https://drive.google.com",
+    "google calendar": "https://calendar.google.com",
+    "google docs": "https://docs.google.com",
+    "hacker news": "https://news.ycombinator.com",
+    "youtube music": "https://music.youtube.com",
+}
+
+
 def _goal_url(goal: str) -> str | None:
+    low = goal.lower()
+    for name, url in NAMED_PLACES.items():
+        if name in low:
+            return url
     if m := URL_RE.search(goal):
         u = m.group(1)
         return u if u.startswith("http") else "https://" + u
@@ -169,6 +186,8 @@ def _navigate_url(goal: str, cfg: config.Config | None = None, in_browser: bool 
         return f"https://www.google.com/search?q={quote_plus(q)}"
 
     u = _goal_url(goal)
+    if u and any(n in goal.lower() for n in NAMED_PLACES):
+        return u
     host = u.split("//", 1)[-1].split("/")[0].removeprefix("www.") if u else None
     if host is None:                   # "search youtube for X" names a site without an address
         host = next((d for n, d in KNOWN_SITES.items()

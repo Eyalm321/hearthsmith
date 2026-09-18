@@ -26,6 +26,9 @@ class Result:
         return round(statistics.median(self.decide_ms), 1) if self.decide_ms else 0.0
 
 
+_keep_tab = [True]        # flipped per run, read by the patched cdp on Agent exit
+
+
 def _patch(cfg: config.Config) -> None:
     """Point the decision call at OpenRouter and stop the tab hiding. Both upstream call sites
     are single lines; wrapping them keeps `pip install -U jev-ultrafast` working."""
@@ -52,6 +55,10 @@ def _patch(cfg: config.Config) -> None:
         def cdp(method: str, **params):
             if method == "Target.createTarget":
                 params["background"] = False    # he works where you can see him
+            if method == "Target.closeTarget" and _keep_tab[0]:
+                # Upstream tidies up after itself; an assistant is supposed to leave the answer
+                # on screen. Failed runs still close, so a dead end doesn't pile up tabs.
+                return {}
             return upstream_cdp(method, **params)
 
         jb.cdp = cdp
@@ -132,6 +139,9 @@ def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
     from jev_ultrafast import Agent
 
     res = Result(False)
+    # The Agent closes its tab on context exit, which runs before any of our own cleanup — so
+    # the decision to keep it has to be made the moment success is seen, not afterwards.
+    _keep_tab[0] = False
     try:
         with Agent(start, goal) as agent:
             for state in agent.run():
@@ -155,6 +165,7 @@ def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
                 status = state.get("status", "")
                 if status in ("done", "blocked", "error"):
                     res.ok = status == "done"
+                    _keep_tab[0] = res.ok      # leave the answer on screen; tidy up dead ends
                     res.note = "" if res.ok else status
                     break
                 if res.elapsed_ms > max_seconds * 1000:
