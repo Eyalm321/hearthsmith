@@ -196,6 +196,48 @@ def _attempt(goal: str, url: str | None, cfg: config.Config | None,
     return res
 
 
+def bring_to_front(cfg: config.Config) -> bool:
+    """His Chrome to the top of the stack. A page being driven behind your editor is invisible
+    work, and when it stops for a captcha you'd never know. Wayland lets a window raise itself
+    only from a shell extension, so ask ours first; without it, fall back to activating via the
+    running Chrome's own second instance — a newly mapped window is the one case Mutter always
+    focuses."""
+    import subprocess
+
+    from hearthsmith.desktop import atspi
+    b = cfg.browser
+    profile = str(b.profile)
+    mine = [w for w in atspi.shell_windows()
+            if "chrom" in (w.get("wm_class", "") + w.get("app", "")).lower()
+            and _owns_profile(w.get("pid"), profile)]
+    if mine:
+        # the focused one if any; else the most recent (highest id), un-minimize via activate
+        target = next((w for w in mine if w.get("focus")), max(mine, key=lambda w: w["id"]))
+        if target.get("focus") and not target.get("minimized"):
+            return True
+        return atspi.activate_window(target["id"])
+    # No extension: a second `chrome --user-data-dir=<same profile>` hands its argv to the
+    # running instance and exits; the instance opens/raises a window and Mutter focuses it.
+    # No url → it just raises the last active window rather than opening a blank one.
+    try:
+        subprocess.run([b.binary, f"--user-data-dir={profile}"], timeout=5, check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _owns_profile(pid: int | None, profile: str) -> bool:
+    """Chrome renderers share the profile flag, so any pid of his instance matches."""
+    if not pid:
+        return False
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return f"--user-data-dir={profile}".encode() in f.read()
+    except OSError:
+        return False
+
+
 def _run_once(goal: str, url: str | None = None, cfg: config.Config | None = None,
               max_seconds: float = 90.0) -> Result:
     """Drive Chrome toward `goal`. `url` is the page to start from; without one the goal's own
@@ -213,6 +255,7 @@ def _run_once(goal: str, url: str | None = None, cfg: config.Config | None = Non
     if not ws:
         return Result(False, note=f"his Chrome isn't reachable on :{cfg.browser.cdp_port}")
     os.environ["BU_CDP_WS"] = ws
+    bring_to_front(cfg)
     # The address is already handled by opening it; leaving "on account.proton.me/signup" in the
     # goal just gives the decider a phrase to match against navigation controls.
     goal = re.sub(r"^\s*(?:on|at|in)\s+\S*(?:\.\w{2,}|/)\S*\s*,?\s*", "", goal).strip() or goal
