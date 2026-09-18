@@ -9,9 +9,13 @@ already has its target — two decisions, one round trip. (Shape borrowed from
 browser-use/jev-ultrafast, MIT; the body here is AT-SPI + uinput, so it works in every app, in
 the windows you can see, not a hidden browser tab.)
 
-Safety: he moves the real mouse. If the pointer wanders between steps (you grabbed it) he stops;
-if the element moved or vanished since the decision, he re-observes instead of clicking blind.
-`--dry` prints decisions and touches nothing.
+Quiet by default: he activates widgets through AT-SPI (`doAction`) and fills fields through
+EditableText, so nothing touches your mouse or keyboard and you can keep working in another
+window while he works in his. Only when a widget exposes no action does he need the real
+pointer — and then only with `--hands` (or `desktop.hands: true`), which is genuinely exclusive:
+you two share one cursor. With `--hands` he also stops the moment the pointer wanders off where
+he left it. Either way, if an element moved or vanished since the decision he re-observes
+instead of acting blind. `--dry` prints decisions and touches nothing.
 """
 
 from __future__ import annotations
@@ -31,6 +35,8 @@ from forge.decide import _wire
 from forge.desktop import atspi
 
 OPS = {
+    "navigate": "open the web address this goal implies, straight in the browser — preferred over "
+                "typing an address or clicking through a search box",
     "click": "click one of the clickable elements",
     "type": "type into one of the text fields, then press Enter",
     "key": "press a keyboard shortcut (address bar, new tab, escape, enter, find)",
@@ -94,21 +100,52 @@ def _fill_value(cfg: config.Config, goal: str, field_desc: str) -> str:
     return out.strip().strip('"').splitlines()[0] if out else goal
 
 
-def _pointer_pos() -> tuple[int, int]:
-    import gi
-    gi.require_version("Gdk", "3.0")
-    from gi.repository import Gdk
-    _, x, y = Gdk.Display.get_default().get_default_seat().get_pointer().get_position()
-    return x, y
+SEARCH_RE = re.compile(r"\bsearch(?:\s+\w+)?\s+for\s+(.+)$", re.IGNORECASE)
 
 
-def _questions(els, wins, win) -> dict:
+def _navigate_url(goal: str) -> str | None:
+    """A URL the goal implies. Beats typing in the address bar: no keyboard, no submit guessing,
+    and the browser does the navigating."""
+    if u := _goal_url(goal):
+        return u
+    m = SEARCH_RE.search(goal) or QUOTED.search(goal)
+    if m:
+        from urllib.parse import quote_plus
+        q = m.group(1).strip().strip("'\"“”‘’")
+        return f"https://www.google.com/search?q={quote_plus(q)}"
+    return None
+
+
+def _launch_target(goal: str) -> str | None:
+    """Which executable the goal implies: a named app, else a browser if it names a site."""
+    low = goal.lower()
+    for name, exe in APPS.items():
+        if re.search(rf"\b{re.escape(name)}\b", low):
+            return exe
+    return "firefox" if _goal_url(goal) else None
+
+
+def _pointer_pos() -> tuple[int, int] | None:
+    """Only the shell can see the cursor on Wayland; None ⇒ we simply don't check for drift."""
+    return atspi.shell_pointer()
+
+
+ADDRESS_BAR = ("search with google or enter address", "address", "url", "location bar")
+
+
+def _questions(els, wins, win, nav_url: str | None = None) -> dict:
     """Speculative heads: every target head holds only elements that operation can act on."""
     clickable = [e for e in els if not e.fillable]
     fillable = [e for e in els if e.fillable]
+    if nav_url:
+        # navigating is strictly better than typing an address: no keyboard, no submit guessing
+        fillable = [e for e in fillable if not any(k in e.name.lower() for k in ADDRESS_BAR)]
+    others = [w for w in wins if w is not win]
     ops = {k: v for k, v in OPS.items()
            if not (k == "click" and not clickable) and not (k == "type" and not fillable)
-           and not (k == "focus" and len(wins) < 2)}
+           and not (k == "focus" and not others)
+           and not (k in ("scroll", "key") and win is None)
+           and not (k == "navigate" and not nav_url)}
     q = {"done": Noul(instructions="The goal is fully achieved as things stand."),
          "operation": Choice(instructions="Best next operation toward the goal.", criteria=ops),
          "key": Choice(instructions="If pressing a shortcut, which one.", criteria=KEYS)}
@@ -118,20 +155,21 @@ def _questions(els, wins, win) -> dict:
     if fillable:
         q["type_target"] = Choice(instructions="If typing, which field.",
                                   criteria={str(e.i): e.desc() for e in fillable})
-    if len(wins) > 1:
+    if others:
         q["window"] = Choice(instructions="If switching windows, which one.",
                              criteria={str(i): f"{w.app}: {w.title}" for i, w in enumerate(wins)
                                        if w is not win})
     return q
 
 
-def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: bool = False) -> Result:
-    from forge.desktop.uinput import Keyboard, Pointer, desktop_size
-
+def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: bool = False,
+        hands: bool | None = None) -> Result:
     cfg = cfg or config.load()
+    hands = cfg.desktop.hands if hands is None else hands
     res = Result(ok=False)
     ptr = kb = None
-    if not dry:
+    if not dry and hands:
+        from forge.desktop.uinput import Keyboard, Pointer, desktop_size
         dw, dh = desktop_size()
         ptr, kb = Pointer(dw, dh), Keyboard()
     last = None
@@ -139,27 +177,31 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
     stale_retries = 0
     try:
         for _ in range(max_steps):
-            if expected_ptr and not dry:
-                px, py = _pointer_pos()
-                if abs(px - expected_ptr[0]) > 40 or abs(py - expected_ptr[1]) > 40:
-                    res.note = "you took the mouse — stopping"
-                    return res
-            wins = atspi.windows()
-            win = next((w for w in wins if w.active), None) or (wins[0] if wins else None)
-            if win is None:
-                res.note = "no windows visible to AT-SPI (is toolkit-accessibility on? app relaunched?)"
+            pos = _pointer_pos() if (expected_ptr and not dry) else None
+            if pos and (abs(pos[0] - expected_ptr[0]) > 60 or abs(pos[1] - expected_ptr[1]) > 60):
+                res.note = "you took the mouse — stopping"
                 return res
-            if not win.shell_id:
+            wins = atspi.windows()
+            on_screen = atspi.shell_windows()
+            win = next((w for w in wins if w.active), None) or (wins[0] if wins else None)
+            if win is not None and not win.shell_id:
                 res.note = ("can't place windows on screen — enable the forge-windows GNOME "
                             "extension (contrib/gnome-extension) and log out/in once")
                 return res
-            els = atspi.elements(win, limit=70)
-            res.window = f"{win.app}: {win.title}"
+            # No accessible window is not the end: the app he needs may simply not be open, or
+            # what's on screen may not expose accessibility. Let Jev decide to launch/focus.
+            els = atspi.elements(win, limit=70) if win is not None else []
+            res.window = f"{win.app}: {win.title}" if win else "(nothing accessible)"
+            opaque = [f"{w['app'] or w['wm_class']}: {w['title']}" for w in on_screen
+                      if not any(x.title == w["title"] for x in wins)]
             state = {"goal": goal, "active_window": res.window,
-                     "other_windows": [f"{w.app}: {w.title}" for w in wins if w is not win][:12],
+                     "other_accessible_windows": [f"{w.app}: {w.title}" for w in wins if w is not win][:12],
+                     "windows_on_screen_without_accessibility": opaque[:12],
                      "steps_so_far": res.steps[-6:],
                      "elements": {str(e.i): e.desc() for e in els}}
-            a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win))
+            nav_url = _navigate_url(goal)
+            state["navigate_would_open"] = nav_url or "(no address in the goal)"
+            a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win, nav_url))
             op = a["operation"]["choice"] if "operation" in a else "stuck"
             if a["done"]["noul"] > 0.7 or op == "done":
                 res.ok = True
@@ -170,18 +212,44 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
 
             before = (len(els), tuple((e.role, e.name) for e in els[:20]))
             step = None
+            if op in ("launch", "scroll", "key") and (op, a.get("key", {}).get("choice")) == last:
+                res.note = f"{op} changed nothing — stopping" if not dry else f"dry: would {op}"
+                return res
+            if op in ("launch", "scroll", "key"):
+                last = (op, a.get("key", {}).get("choice"))
 
-            if op == "launch":
-                m = SITE_RE.search(goal)
-                exe = APPS.get((m.group(1).lower() if m else ""), None) or ("firefox" if _goal_url(goal) else None)
+            if op == "navigate":
+                u = _navigate_url(goal)
+                if not u:
+                    res.note = "navigate chosen but no address or search in the goal"
+                    return res
+                if (op, u) == last:
+                    res.note = "already navigated there"
+                    return res
+                last = (op, u)
+                step = f"navigate {u}"
+                if not dry:
+                    subprocess.Popen(["xdg-open", u], stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                    for _ in range(25):
+                        time.sleep(0.4)
+                        w2 = next((x for x in atspi.windows() if x.app == (win.app if win else "")), None)
+                        if w2 and w2.title != (win.title if win else ""):
+                            break
+
+            elif op == "launch":
+                exe = _launch_target(goal)
                 if not exe:
-                    res.note = "launch chosen but no known app in goal"
+                    res.note = "launch chosen but I don't know which app that is"
                     return res
                 step = f"launch {exe}"
                 if not dry:
                     args = [exe] + ([_goal_url(goal)] if exe == "firefox" and _goal_url(goal) else [])
                     subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(3.0)
+                    for _ in range(30):              # wait for it to register with AT-SPI
+                        time.sleep(0.4)
+                        if any(exe.split("-")[0] in w.app.lower() for w in atspi.windows()):
+                            break
 
             elif op == "focus" and "window" in a:
                 w = wins[int(a["window"]["choice"])]
@@ -196,12 +264,18 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                 k = a["key"]["choice"]
                 step = f"key {k}"
                 if not dry:
+                    if not kb:
+                        res.note = f"'{k}' needs the keyboard — rerun with --hands"
+                        return res
                     kb.tap(k)
                     atspi.wait_settled(win, before, cap_ms=400)
 
             elif op == "scroll":
                 step = "scroll"
                 if not dry:
+                    if not ptr:
+                        res.note = "scrolling needs the mouse — rerun with --hands"
+                        return res
                     ptr.move(win.x + win.w // 2, win.y + win.h // 2)
                     ptr.wheel(5)
                     expected_ptr = (win.x + win.w // 2, win.y + win.h // 2)
@@ -234,19 +308,40 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
 
                 if op == "type":
                     val = _fill_value(cfg, goal, tgt.desc())
-                    step = f"type into '{tgt.desc()}': {val!r} + Enter"
+                    step = f"type into '{tgt.desc()}': {val!r}"
                     if not dry:
-                        ptr.click(tgt.cx, tgt.cy)
-                        expected_ptr = (tgt.cx, tgt.cy)
-                        time.sleep(0.15)
-                        kb.type_text(val, enter=True)
+                        if atspi.set_text(tgt, val):                    # quiet: no keyboard
+                            if atspi.submit_near(tgt, els):
+                                step += " + Search"
+                            elif kb:
+                                kb.tap("enter")
+                                step += " + Enter"
+                            else:
+                                step += " (typed; nothing to submit it — may need --hands)"
+                        elif ptr and kb:
+                            ptr.click(tgt.cx, tgt.cy)
+                            expected_ptr = (tgt.cx, tgt.cy)
+                            time.sleep(0.15)
+                            kb.type_text(val, enter=True)
+                            step += " + Enter (mouse)"
+                        else:
+                            res.note = f"'{tgt.desc()}' won't take text quietly — rerun with --hands"
+                            return res
                         # a combobox that pops suggestions gets its moment, a fast one costs 50ms
                         atspi.wait_settled(win, before, cap_ms=600)
                 else:
                     step = f"click '{tgt.desc()}'"
                     if not dry:
-                        ptr.click(tgt.cx, tgt.cy)
-                        expected_ptr = (tgt.cx, tgt.cy)
+                        if atspi.do_action(tgt):                        # quiet: no pointer
+                            pass
+                        elif ptr:
+                            ptr.click(tgt.cx, tgt.cy)
+                            expected_ptr = (tgt.cx, tgt.cy)
+                            step += " (mouse)"
+                        else:
+                            res.note = (f"'{tgt.desc()}' has no accessible action — rerun with "
+                                        "--hands to let me use the mouse")
+                            return res
                         atspi.wait_settled(win, before, cap_ms=600)
 
             res.steps.append(step)

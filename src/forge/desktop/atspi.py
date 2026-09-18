@@ -80,6 +80,21 @@ def shell_windows() -> list[dict]:
         return []
 
 
+def shell_pointer() -> tuple[int, int] | None:
+    """Cursor position from the extension. None when it isn't available — Wayland clients can't
+    read the pointer themselves (GDK returns 0,0), so the caller must not guess."""
+    try:
+        out = subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell",
+                              "--object-path", "/org/forge/Windows", "--method", "org.forge.Windows.Pointer"],
+                             capture_output=True, text=True, timeout=3, check=False).stdout.strip()
+        if not out.startswith("('"):
+            return None
+        d = json.loads(out[2:-3].encode().decode("unicode_escape"))
+        return int(d["x"]), int(d["y"])
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return None
+
+
 def activate_window(win_id: int) -> bool:
     try:
         out = subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell",
@@ -217,6 +232,62 @@ def elements(win: Window, limit: int = 80, max_depth: int = 40) -> list[Element]
             if len(out) >= limit:
                 break
     return out
+
+
+# Preference order when an element offers several actions.
+ACTION_PREF = ("click", "activate", "switch", "press", "jump", "open", "toggle", "expand")
+
+
+def actions(el: Element) -> list[str]:
+    try:
+        a = el.acc.queryAction()
+        return [a.getName(i).lower() for i in range(a.nActions)]
+    except Exception:  # noqa: BLE001 — not every widget implements Action
+        return []
+
+
+def do_action(el: Element) -> bool:
+    """Activate a widget through AT-SPI — no pointer, no keystrokes, so it works while the user
+    is typing somewhere else. False when the widget exposes no usable action."""
+    try:
+        a = el.acc.queryAction()
+        names = [a.getName(i).lower() for i in range(a.nActions)]
+    except Exception:  # noqa: BLE001
+        return False
+    order = [names.index(p) for p in ACTION_PREF if p in names] or ([0] if names else [])
+    for i in order:
+        try:
+            if a.doAction(i):
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def set_text(el: Element, value: str) -> bool:
+    """Replace a field's contents through AT-SPI EditableText — again, no keyboard."""
+    try:
+        et = el.acc.queryEditableText()
+        try:
+            n = el.acc.queryText().characterCount
+        except Exception:  # noqa: BLE001
+            n = 0
+        if n:
+            et.deleteText(0, n)
+        return bool(et.insertText(0, value, len(value)))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def submit_near(el: Element, els: list[Element]) -> bool:
+    """After filling a field, press its Search/Go/Submit button — the quiet equivalent of Enter."""
+    words = ("search", "go", "submit", "find", "apply", "ok", "enter")
+    close = sorted((e for e in els if e is not el and not e.fillable),
+                   key=lambda e: abs(e.y - el.y) + abs(e.x - el.x))
+    for e in close[:12]:
+        if any(w in e.name.lower() for w in words) and do_action(e):
+            return True
+    return False
 
 
 def fresh(el: Element, win: Window, tol: int = 6) -> Element | None:

@@ -7,6 +7,7 @@ const IFACE = `
   <interface name="org.forge.Windows">
     <method name="List"><arg type="s" direction="out" name="json"/></method>
     <method name="Activate"><arg type="u" direction="in" name="id"/><arg type="b" direction="out" name="ok"/></method>
+    <method name="Pointer"><arg type="s" direction="out" name="json"/></method>
   </interface>
 </node>`;
 
@@ -39,6 +40,13 @@ export default class ForgeWindows extends Extension {
             });
         }
         return JSON.stringify(out);
+    }
+
+    Pointer() {
+        // Wayland clients cannot read the cursor; the shell can. Used only to notice when the
+        // user grabs the mouse mid-task so the assistant stops.
+        const [x, y, mods] = global.get_pointer();
+        return JSON.stringify({x, y, mods});
     }
 
     Activate(id) {

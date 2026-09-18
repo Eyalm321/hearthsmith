@@ -35,7 +35,7 @@ def main() -> None:
     mu = sub.add_parser("mute", help="stop all nagging for a while"); mu.add_argument("minutes", type=int, nargs="?", default=60)
     sub.add_parser("unmute")
     br = sub.add_parser("browse", help="Jev drives your Firefox toward a goal"); br.add_argument("goal", nargs="+"); br.add_argument("--json", action="store_true")
-    do = sub.add_parser("do", help="computer use: Jev drives any app (AT-SPI + uinput)"); do.add_argument("goal", nargs="+"); do.add_argument("--json", action="store_true"); do.add_argument("--dry", action="store_true")
+    do = sub.add_parser("do", help="computer use: Jev drives any app (AT-SPI + uinput)"); do.add_argument("goal", nargs="+"); do.add_argument("--json", action="store_true"); do.add_argument("--dry", action="store_true"); do.add_argument("--hands", action="store_true", help="let him use the real mouse/keyboard (exclusive — you two share one cursor)")
     sub.add_parser("windows", help="what the smith can see on screen")
     sy = sub.add_parser("say", help="tell the blacksmith something; Jev routes it"); sy.add_argument("text", nargs="+"); sy.add_argument("--json", action="store_true")
     args = ap.parse_args()
@@ -65,7 +65,7 @@ def main() -> None:
         store.kv_set("muted_until", "0"); print("unmuted")
     elif args.cmd == "do":
         from forge.desktop.agent import run
-        r = run(" ".join(args.goal), cfg, dry=args.dry)
+        r = run(" ".join(args.goal), cfg, dry=args.dry, hands=args.hands or None)
         print(json.dumps(r.__dict__) if args.json else
               ("done" if r.ok else f"not done ({r.note})") + f" @ {r.window}\n  " + "\n  ".join(r.steps))
     elif args.cmd == "windows":

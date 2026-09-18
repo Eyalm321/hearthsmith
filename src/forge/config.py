@@ -54,6 +54,14 @@ class HyperpanesCfg:
 
 
 @dataclass
+class DesktopCfg:
+    # False = quiet: act through AT-SPI actions/EditableText only, never the real mouse or
+    # keyboard, so he can work while you work. True = he may drive the shared cursor.
+    hands: bool = False
+    max_steps: int = 12
+
+
+@dataclass
 class NagCfg:
     min_gap_minutes: int = 45
     quiet_hours: tuple[int, int] = (23, 8)  # local; no nags from 23:00 to 08:00
@@ -67,6 +75,7 @@ class Config:
     decide: DecideCfg = field(default_factory=DecideCfg)
     compose: ComposeCfg = field(default_factory=ComposeCfg)
     hyperpanes: HyperpanesCfg = field(default_factory=HyperpanesCfg)
+    desktop: DesktopCfg = field(default_factory=DesktopCfg)
     nag: NagCfg = field(default_factory=NagCfg)
     db_path: Path = STATE_DIR / "forge.db"
     sprite_path: Path = STATE_DIR / "sprite.json"

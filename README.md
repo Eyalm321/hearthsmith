@@ -72,11 +72,14 @@ blacksmith is customizable without new art.
 
 ## Computer use
 
-He works in **your** apps, on screen, with a real mouse and keyboard — no headless browser, no
-remote-debugging ports, no separate profile. Observe = AT-SPI2 accessibility tree (every GTK/Qt/
+He works in **your** apps, on screen — no headless browser, no remote-debugging ports, no
+separate profile. **Quiet by default: he never touches your mouse or keyboard**, so he can work
+while you work. Widgets are activated through AT-SPI actions (`switch` a tab, `activate` a
+button), fields filled through EditableText, web addresses opened straight in the browser.
+`--hands` lets him drive the shared cursor for the widgets that expose no action — that one is
+exclusive, and he stops the moment the pointer wanders off where he left it. Observe = AT-SPI2 accessibility tree (every GTK/Qt/
 Electron app and Firefox/Chromium page content), decide = Jev (typed Choice over the visible
-elements, ~0.5s), act = `/dev/uinput` absolute pointer + clipboard paste. If you grab the mouse
-mid-task he stops.
+elements, ~0.5s), act = AT-SPI actions first, `/dev/uinput` only under `--hands`.
 
 Setup (once):
 - `gsettings set org.gnome.desktop.interface toolkit-accessibility true` (install.sh does it)
