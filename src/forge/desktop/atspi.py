@@ -14,9 +14,11 @@ import pyatspi
 ACTIONABLE = {
     "push button", "toggle button", "link", "entry", "password text", "text", "combo box",
     "check box", "radio button", "menu item", "check menu item", "radio menu item", "page tab",
-    "list item", "tree item", "table cell", "slider", "spin button", "menu", "document web",
+    "list item", "tree item", "table cell", "slider", "spin button", "menu",
     "search box", "autocomplete",
 }
+# Containers, not controls: clicking the document is a no-op that looks like an action.
+NEVER_TARGET = {"document web", "document frame", "panel", "filler", "section"}
 FILLABLE = {"entry", "password text", "text", "search box", "autocomplete", "spin button"}
 SKIP_APPS = {"gnome-shell", "ibus-extension-gtk3", "xdg-desktop-portal-gtk", "xdg-desktop-portal-gnome",
              "evolution-alarm-notify", "mutter-x11-frames", "renderer.py", "forge"}
@@ -206,7 +208,7 @@ def elements(win: Window, limit: int = 80, max_depth: int = 40) -> list[Element]
                 role = c.getRoleName()
             except Exception:  # noqa: BLE001
                 continue
-            if role not in ACTIONABLE or not _showing(c):
+            if role not in ACTIONABLE or role in NEVER_TARGET or not _showing(c):
                 continue
             ext = _extents(c)
             if not ext or ext[2] < 3 or ext[3] < 3:

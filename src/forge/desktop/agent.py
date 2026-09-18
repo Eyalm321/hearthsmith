@@ -199,6 +199,16 @@ def _navigate_url(goal: str, cfg: config.Config | None = None, in_browser: bool 
     return None
 
 
+# Controls that mean "your edit is not applied yet". A decider looking at a filled-in form
+# happily calls it finished while the date picker is still open over it.
+COMMIT = re.compile(r"^(done|ok|apply|update|save|search|search flights|go|submit|confirm)$",
+                    re.IGNORECASE)
+
+
+def _pending_commit(els) -> object | None:
+    return next((e for e in els if not e.fillable and e.name and COMMIT.match(e.name.strip())), None)
+
+
 LOOKUP = re.compile(r"\b(look (?:for|up)|show me|find|search|what(?:'s| is)|how much|price of)\b",
                     re.IGNORECASE)
 
@@ -283,6 +293,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
     stale_retries = 0
     visited: list[str] = []
     filled: dict[str, str] = {}
+    commits = 0
     try:
         for _ in range(max_steps):
             pos = _pointer_pos() if (expected_ptr and not dry) else None
@@ -333,9 +344,23 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
             state["navigate_would_open"] = nav_url or "(nothing new to open — use the page)"
             if visited:
                 state["already_opened"] = visited
+            state["uncommitted_control"] = (
+                pend.desc() if (pend := _pending_commit(els)) else "(none)")
             a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win, nav_url, hands))
             op = a["operation"]["choice"] if "operation" in a else "stuck"
             if a["done"]["noul"] > 0.7 or op == "done":
+                # a visible Done/Search button means the work is staged, not finished
+                if pend and commits < 3:
+                    commits += 1
+                    step = f"commit '{pend.name}'"
+                    if not dry:
+                        if not atspi.do_action(pend) and ptr:
+                            ptr.click(pend.cx, pend.cy)
+                            expected_ptr = (pend.cx, pend.cy)
+                        atspi.wait_settled(win, (len(els), tuple((e.role, e.name) for e in els[:20])),
+                                           cap_ms=1500)
+                    res.steps.append(step)
+                    continue
                 res.ok = True
                 return res
             if op == "stuck":
