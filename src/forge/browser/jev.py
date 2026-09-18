@@ -239,7 +239,10 @@ def _run_once(goal: str, url: str | None = None, cfg: config.Config | None = Non
                     # need it open — it means the agent wants a human, and closing the page is
                     # the one thing that makes taking over impossible.
                     _keep_tab[0] = res.ok or status == "blocked" or bool(res.steps)
-                    res.note = "" if res.ok else status
+                    if res.ok:
+                        res.note = ""
+                    elif not res.note:
+                        res.note = status
                     (say.done(f"Done — {res.title or 'have a look'}.") if res.ok
                      else say.failed(f"Couldn't finish: {status}."))
                     break
