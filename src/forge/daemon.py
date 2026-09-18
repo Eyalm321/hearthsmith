@@ -60,6 +60,10 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
     last = store.last_nag_at()
 
     if not force:
+        muted = int(store.kv_get("muted_until", "0") or 0)
+        if muted > time.time():
+            sprite.write("sleep")
+            return {"skipped": "muted", "until": muted}
         if in_quiet_hours(cfg.nag):
             sprite.write("sleep")
             return {"skipped": "quiet_hours"}

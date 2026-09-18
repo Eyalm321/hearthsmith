@@ -370,6 +370,11 @@ class Sprite(Gtk.Window):
                 save_avatar_cfg({"x": x, "y": y, "corner": None})
                 self._cfg_mtime = AVATAR_CFG.stat().st_mtime
                 self._suppress_save = time.time() + 1.0
+            elif self.text:
+                self.text = ""          # first click dismisses what he's saying
+                self.bubble.hide()
+                if self.state in ("forge", "alert"):
+                    self.state, self.frame = "idle", 0
             else:
                 self.open_prompt()
         self._press = None
@@ -423,6 +428,12 @@ class Sprite(Gtk.Window):
         m.append(Gtk.SeparatorMenuItem())
         item("Talk to him…", self.open_prompt)
         item("Nag me now", lambda: self._systemctl("start", "forged-now.service"))
+        mute = Gtk.Menu()
+        for lab, mins in (("1 hour", 60), ("4 hours", 240), ("Rest of today", 24 * 60), ("Unmute", 0)):
+            it = Gtk.MenuItem(label=lab)
+            it.connect("activate", lambda _i, mins=mins: self._forge("unmute" if mins == 0 else "mute", str(mins)))
+            mute.append(it)
+        item("Mute nagging", None, mute)
         m.append(Gtk.SeparatorMenuItem())
         item("Hide", lambda: self._systemctl("stop", "forge-sprite.service"))
         m.show_all()
@@ -436,6 +447,10 @@ class Sprite(Gtk.Window):
         self.pack = packmod.load(out)
         self._pix.clear()
         save_avatar_cfg({"sheet": sheet.stem})
+
+    def _forge(self, *args: str) -> None:
+        import subprocess
+        subprocess.Popen([str(Path.home() / "dev/forge/.venv/bin/forge"), *[a for a in args if a]])
 
     def _systemctl(self, verb: str, unit: str) -> None:
         import subprocess

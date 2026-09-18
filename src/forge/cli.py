@@ -32,6 +32,8 @@ def main() -> None:
     sn = sub.add_parser("snooze"); sn.add_argument("task_id"); sn.add_argument("--minutes", type=int, default=120)
     sub.add_parser("state", help="print the T0 state paragraph the decider sees")
     sub.add_parser("nags")
+    mu = sub.add_parser("mute", help="stop all nagging for a while"); mu.add_argument("minutes", type=int, nargs="?", default=60)
+    sub.add_parser("unmute")
     sy = sub.add_parser("say", help="tell the blacksmith something; Jev routes it"); sy.add_argument("text", nargs="+"); sy.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -52,6 +54,12 @@ def main() -> None:
     elif args.cmd == "state":
         hp = Hyperpanes(cfg.hyperpanes.control_file, cfg.hyperpanes.tail_lines)
         print(build_state(store, hp, cfg)[0])
+    elif args.cmd == "mute":
+        until = int(time.time()) + args.minutes * 60
+        store.kv_set("muted_until", str(until))
+        print(f"muted until {datetime.fromtimestamp(until):%H:%M}")
+    elif args.cmd == "unmute":
+        store.kv_set("muted_until", "0"); print("unmuted")
     elif args.cmd == "say":
         from forge.route import route
         r = route(" ".join(args.text), cfg)
