@@ -61,10 +61,16 @@ def save_avatar_cfg(patch: dict) -> None:
 
 
 class Bubble(Gtk.Window):
-    """Speech balloon: its own transparent always-on-top popup, tail aimed at the sprite's head,
-    placed above/left/right of him depending on screen room. Click-through."""
+    """Pixel-art speech balloon (parchment, stepped corners, blocky tail) drawn on a unit grid so
+    it stays crisp; VT323 text typed out at ~30 cps. Own click-through popup, tail aimed at him."""
 
-    PAD, RADIUS, TAIL = 12, 12, 14
+    U = 3                       # screen px per balloon pixel
+    PAD = 3                     # units
+    TAIL = 4                    # units
+    COLS = 100                  # max width in units
+    CPS = 32
+    C = {"o": (0.23, 0.15, 0.10), "f": (0.91, 0.76, 0.60), "h": (0.97, 0.87, 0.75),
+         "s": (0.80, 0.62, 0.45), "t": (0.17, 0.11, 0.07)}
 
     def __init__(self):
         super().__init__(type=Gtk.WindowType.POPUP)
@@ -78,99 +84,160 @@ class Bubble(Gtk.Window):
         self.area = Gtk.DrawingArea()
         self.area.connect("draw", self.on_draw)
         self.add(self.area)
-        self.text, self.tail_side, self.tail_at = "", "bottom", 0.5
+        self.text, self.shown, self.tail_side, self.tail_at = "", 0, "bottom", 0.5
+        self.font = Pango.FontDescription("VT323 21px")
         self.connect("realize", lambda *_: self.get_window().input_shape_combine_region(
             cairo.Region(), 0, 0))
 
-    def layout(self, cr, width):
+    # -- text ----------------------------------------------------------------------------------
+
+    def _layout(self, cr, width_px: int, text: str):
         lay = PangoCairo.create_layout(cr)
-        lay.set_font_description(Pango.FontDescription("Sans 11"))
-        lay.set_width(width * Pango.SCALE)
+        lay.set_font_description(self.font)
+        lay.set_width(width_px * Pango.SCALE)
         lay.set_wrap(Pango.WrapMode.WORD_CHAR)
-        lay.set_text(self.text, -1)
+        lay.set_text(text, -1)
         return lay
+
+    def _type(self) -> bool:
+        if self.shown >= len(self.text):
+            return False
+        self.shown += 1
+        self.area.queue_draw()
+        ch = self.text[self.shown - 1]
+        delay = 260 if ch in ".!?" else 120 if ch in ",;:—" else int(1000 / self.CPS)
+        GLib.timeout_add(delay, self._type)
+        return False
+
+    @property
+    def done(self) -> bool:
+        return self.shown >= len(self.text)
+
+    # -- placement -----------------------------------------------------------------------------
 
     def show_at(self, text: str, anchor: tuple[int, int, int, int]) -> None:
         """anchor = sprite body rect (x, y, w, h) in root coords."""
+        restart = text != self.text
         self.text = text
+        if restart:
+            self.shown = 0
+            GLib.timeout_add(80, self._type)
+        U, P, T = self.U, self.PAD, self.TAIL
         sx, sy, sw, sh = anchor
         mon = self.get_screen().get_display().get_primary_monitor().get_workarea()
-        # measure
         surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
         cr = cairo.Context(surf)
-        lay = self.layout(cr, BUBBLE_W - 2 * self.PAD)
-        _, ext = lay.get_pixel_extents()
-        bw, bh = min(BUBBLE_W, ext.width + 2 * self.PAD), ext.height + 2 * self.PAD
-        # above him if there's room, else beside him on the side with more space
-        if sy - bh - self.TAIL - 8 >= mon.y:
+        _, ext = self._layout(cr, (self.COLS - 2 * P - 2) * U, text).get_pixel_extents()
+        self.bw = min(self.COLS, -(-ext.width // U) + 2 * P + 2)   # units, incl. outline
+        self.bh = -(-ext.height // U) + 2 * P + 2
+        bwp, bhp = self.bw * U, self.bh * U
+        if sy - bhp - T * U - 8 >= mon.y:
             self.tail_side = "bottom"
-            x = sx + sw // 2 - bw // 2
-            y = sy - bh - self.TAIL - 4
-            x = max(mon.x + 4, min(x, mon.x + mon.width - bw - 4))
-            self.tail_at = (sx + sw // 2 - x) / bw
-            self.resize(bw, bh + self.TAIL)
+            x = sx + sw // 2 - bwp // 2
+            y = sy - bhp - T * U - 4
+            x = max(mon.x + 4, min(x, mon.x + mon.width - bwp - 4))
+            self.tail_at = (sx + sw // 2 - x) // U
+            self.resize(bwp, bhp + T * U)
         else:
             right_room = mon.x + mon.width - (sx + sw)
-            self.tail_side = "left" if right_room >= bw + self.TAIL + 8 else "right"
-            x = sx + sw + self.TAIL + 4 if self.tail_side == "left" else sx - bw - self.TAIL - 4
-            y = max(mon.y + 4, min(sy + sh // 4 - bh // 2, mon.y + mon.height - bh - 4))
-            self.tail_at = (sy + sh // 3 - y) / bh
-            self.resize(bw + self.TAIL, bh)
+            self.tail_side = "left" if right_room >= bwp + T * U + 8 else "right"
+            x = sx + sw + T * U + 4 if self.tail_side == "left" else sx - bwp - T * U - 4
+            y = max(mon.y + 4, min(sy + sh // 4 - bhp // 2, mon.y + mon.height - bhp - 4))
+            self.tail_at = (sy + sh // 3 - y) // U
+            self.resize(bwp + T * U, bhp)
         self.move(int(x), int(y))
         self.show_all()
         self.area.queue_draw()
+
+    # -- raster --------------------------------------------------------------------------------
+
+    def _grid(self) -> tuple[dict[tuple[int, int], str], int, int]:
+        """Cells → palette key. Body at (ox, oy); tail hangs off it."""
+        bw, bh, T = self.bw, self.bh, self.TAIL
+        ox = T if self.tail_side == "left" else 0
+        oy = 0
+        g: dict[tuple[int, int], str] = {}
+        cut = {(0, 0), (1, 0), (0, 1)}  # stepped corner: drop 3 cells, outline the diagonal
+        for y in range(bh):
+            for x in range(bw):
+                cx = min(x, bw - 1 - x)
+                cy = min(y, bh - 1 - y)
+                if (cx, cy) in cut:
+                    continue
+                edge = x in (0, bw - 1) or y in (0, bh - 1) or (cx, cy) in {(1, 1), (2, 0), (0, 2)}
+                if edge:
+                    k = "o"
+                elif y == 1 or x == 1:
+                    k = "h"
+                elif y == bh - 2 or x == bw - 2:
+                    k = "s"
+                else:
+                    k = "f"
+                g[(ox + x, oy + y)] = k
+        # tail: stepped wedge, TAIL units tall, 2 units narrower per step, outlined
+        T2 = T
+        if self.tail_side == "bottom":
+            tc = max(2 * T2 + 3, min(bw - 3, int(self.tail_at)))   # right edge of the wedge
+            for k in range(T2):
+                y = oy + bh + k
+                w = 2 * (T2 - k) + 1
+                for x in range(tc - w, tc):
+                    g[(ox + x, y)] = "f"
+                g[(ox + tc - w - 1, y)] = "o"
+                g[(ox + tc, y)] = "o"
+            g[(ox + tc - 1, oy + bh + T2)] = "o"
+            g[(ox + tc, oy + bh + T2)] = "o"
+            w0 = 2 * T2 + 1
+            for x in range(tc - w0, tc):
+                g[(ox + x, oy + bh - 1)] = "f"    # open the body edge into the tail
+            g[(ox + tc - w0, oy + bh - 1)] = "s"
+        else:
+            tr = max(2 * T2 + 3, min(bh - 3, int(self.tail_at)))
+            for k in range(T2):
+                x = (ox - 1 - k) if self.tail_side == "left" else (ox + bw + k)
+                w = 2 * (T2 - k) + 1
+                for y in range(tr - w, tr):
+                    g[(x, y)] = "f"
+                g[(x, tr - w - 1)] = "o"
+                g[(x, tr)] = "o"
+            xt = (ox - 1 - T2) if self.tail_side == "left" else (ox + bw + T2)
+            g[(xt, tr - 1)] = "o"
+            g[(xt, tr)] = "o"
+            xe = ox if self.tail_side == "left" else ox + bw - 1
+            w0 = 2 * T2 + 1
+            for y in range(tr - w0, tr):
+                g[(xe, y)] = "f"
+            g[(xe, tr - w0)] = "s"
+        return g, ox, oy
 
     def on_draw(self, _w, cr) -> bool:
         cr.set_source_rgba(0, 0, 0, 0)
         cr.set_operator(cairo.OPERATOR_SOURCE)
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
-        W, H = self.get_size()
-        t, r = self.TAIL, self.RADIUS
-        # body rect depends on tail side
-        bx, by, bw, bh = 0, 0, W, H
-        if self.tail_side == "bottom":
-            bh -= t
-        elif self.tail_side == "left":
-            bx, bw = t, W - t
-        else:
-            bw = W - t
-        self._rounded(cr, bx, by, bw, bh, r)
-        # tail
-        if self.tail_side == "bottom":
-            tx = bx + max(r + 6, min(bw - r - 6, self.tail_at * bw))
-            cr.move_to(tx - 9, by + bh - 1); cr.line_to(tx + 9, by + bh - 1); cr.line_to(tx, H)
-        elif self.tail_side == "left":
-            ty = by + max(r + 6, min(bh - r - 6, self.tail_at * bh))
-            cr.move_to(bx + 1, ty - 9); cr.line_to(bx + 1, ty + 9); cr.line_to(0, ty)
-        else:
-            ty = by + max(r + 6, min(bh - r - 6, self.tail_at * bh))
-            cr.move_to(bw - 1, ty - 9); cr.line_to(bw - 1, ty + 9); cr.line_to(W, ty)
-        cr.close_path()
-        cr.set_source_rgba(0.08, 0.08, 0.09, 0.96)
-        cr.fill_preserve()
-        cr.set_source_rgb(1, 0.6, 0.18)
-        cr.set_line_width(2)
-        cr.stroke()
-        # body again on top to hide the tail's inner stroke
-        self._rounded(cr, bx, by, bw, bh, r)
-        cr.set_source_rgba(0.08, 0.08, 0.09, 1)
-        cr.fill_preserve()
-        cr.set_source_rgb(1, 0.6, 0.18)
-        cr.stroke()
-        cr.set_source_rgb(0.95, 0.95, 0.95)
-        cr.move_to(bx + self.PAD, by + self.PAD)
-        PangoCairo.show_layout(cr, self.layout(cr, bw - 2 * self.PAD))
+        cr.set_antialias(cairo.ANTIALIAS_NONE)
+        U = self.U
+        g, ox, oy = self._grid()
+        for (x, y), k in g.items():
+            cr.set_source_rgb(*self.C[k])
+            cr.rectangle(x * U, y * U, U, U)
+            cr.fill()
+        cr.set_antialias(cairo.ANTIALIAS_DEFAULT)
+        cr.set_source_rgb(*self.C["t"])
+        tx, ty = (ox + self.PAD + 1) * U, (oy + self.PAD + 1) * U
+        shown = self.text[:self.shown]
+        cr.move_to(tx, ty)
+        lay = self._layout(cr, (self.bw - 2 * self.PAD - 2) * U, shown)
+        PangoCairo.show_layout(cr, lay)
+        if not self.done and int(time.time() * 3) % 2 == 0:  # block cursor
+            _, ext = lay.get_pixel_extents()
+            lines = lay.get_line_count()
+            last = lay.get_line_readonly(lines - 1).get_pixel_extents()[1] if lines else None
+            cx = tx + (last.x + last.width if last else 0)
+            cy = ty + ext.height - 14 if shown else ty + 2
+            cr.rectangle(cx + 2, cy, 8, 14)
+            cr.fill()
         return True
-
-    @staticmethod
-    def _rounded(cr, x, y, w, h, r) -> None:
-        cr.new_sub_path()
-        cr.arc(x + w - r, y + r, r, -1.5708, 0)
-        cr.arc(x + w - r, y + h - r, r, 0, 1.5708)
-        cr.arc(x + r, y + h - r, r, 1.5708, 3.1416)
-        cr.arc(x + r, y + r, r, 3.1416, 4.7124)
-        cr.close_path()
 
 
 class Sprite(Gtk.Window):
@@ -530,7 +597,20 @@ class Sprite(Gtk.Window):
         cr.paint()
 
 
+def _add_fonts() -> None:
+    """Register assets/fonts with fontconfig for this process (no system install needed)."""
+    import ctypes
+    import ctypes.util
+    lib = ctypes.util.find_library("fontconfig")
+    if not lib:
+        return
+    fc = ctypes.CDLL(lib)
+    for f in (Path(__file__).resolve().parents[3] / "assets/fonts").glob("*.ttf"):
+        fc.FcConfigAppFontAddFile(None, str(f).encode())
+
+
 def main() -> None:
+    _add_fonts()
     ap = argparse.ArgumentParser(prog="forge-sprite")
     ap.add_argument("--scale", type=float, help="default size multiplier (avatar.yaml wins)")
     ap.add_argument("--corner", help="default corner (avatar.yaml wins)")
