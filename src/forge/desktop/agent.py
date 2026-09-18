@@ -420,7 +420,12 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                 step = f"launch {exe}"
                 if not dry:
                     args = [exe] + ([_goal_url(goal)] if exe == "firefox" and _goal_url(goal) else [])
-                    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # Scope the app to the graphical session. A bare Popen outlives a logout:
+                    # the window dies with the compositor but the process keeps the profile
+                    # lock, and every later launch silently hands off to a corpse.
+                    subprocess.Popen(["systemd-run", "--user", "--quiet", "--collect", "--scope",
+                                      "--slice=app-graphical.slice", *args],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     for _ in range(30):              # wait for it to register with AT-SPI
                         time.sleep(0.4)
                         if any(exe.split("-")[0] in w.app.lower() for w in atspi.windows()):
