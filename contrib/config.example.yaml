@@ -26,7 +26,7 @@ nag:
   channels: [hyperpanes, notify]
 voice:
   enabled: true                    # he says nags and answers out loud, on top of sprite/pane/notify
-  engines: [auk, qwen]             # tried in order; auk = HF space (best, ~8 free lines/day), qwen = local server
+  engines: [pocket, auk, qwen]     # tried in order; pocket = CPU realtime stream, auk = HF space (best clone), qwen = GPU
   variant: "AuK-Flash ⚡"           # or "AuK (Base)": slower, cleaner
   qwen_url: http://127.0.0.1:7861  # ~/dev/hearthsmith-voice, hearthsmith-voice.service (Qwen3-TTS-0.6B, fp32)
   ref: assets/voice/dwarf.wav      # the clip IS the voice — swap it (and ref_text) and he sounds like someone else

@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -92,6 +93,38 @@ class Voice:
         shutil.move(got, out)
         shutil.rmtree(Path(got).parent, ignore_errors=True)  # gradio's per-call dir
 
+    def _pocket_stream(self, text: str) -> bool:
+        """The realtime path: PCM chunks go from the server straight into the player as they
+        are made (first sound ~0.2s), and are tee'd into the cache so a repeat is instant."""
+        out = self.cfg.cache_dir / f"{self._key(text, 'pocket')}.wav"
+        if out.exists():
+            return play(out, self.cfg.timeout_seconds, self.cfg.sink)
+        player = raw_player(self.cfg.sink)
+        if player is None:
+            return False
+        pcm = bytearray()
+        with httpx.stream("POST", f"{self.cfg.qwen_url}/api/stream", timeout=self.cfg.timeout_seconds,
+                          json={"text": text, "ref": str(self.cfg.ref)}) as r:
+            r.raise_for_status()
+            with subprocess.Popen(player, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL) as proc:
+                try:
+                    for b in r.iter_bytes():
+                        proc.stdin.write(b)
+                        pcm += b
+                finally:
+                    proc.stdin.close()
+                    proc.wait(timeout=self.cfg.timeout_seconds)
+        write_wav(out, bytes(pcm), 24000)
+        return proc.returncode == 0
+
+    def _pocket(self, part: str, out: Path) -> None:
+        """Non-streaming variant for `synth` (--no-play): same endpoint, whole body."""
+        r = httpx.post(f"{self.cfg.qwen_url}/api/stream", timeout=self.cfg.timeout_seconds,
+                       json={"text": part, "ref": str(self.cfg.ref)})
+        r.raise_for_status()
+        write_wav(out, r.content, 24000)
+
     def _qwen(self, part: str, out: Path) -> None:
         r = httpx.post(f"{self.cfg.qwen_url}/api/tts", timeout=self.cfg.timeout_seconds,
                        json={"text": part, "ref": str(self.cfg.ref),
@@ -127,16 +160,28 @@ class Voice:
                 self.engines.pop(0)
         raise RuntimeError(f"no engine could speak: {last}")
 
+    def speak(self, text: str) -> bool:
+        if not self.available():
+            return False
+        # pocket streams the whole line itself; no chunking, no pipeline needed
+        if self.engines[0] == "pocket":
+            try:
+                return self._pocket_stream(text)
+            except Exception as e:  # noqa: BLE001 — server down: fall through to the next engine
+                log.warning("voice: pocket refused (%s)", str(e)[:120])
+                self.engines.pop(0)
+                if not self.engines:
+                    return False
+        return self._speak_chunked(text)
+
     def _chunk_seconds(self) -> float:
         # AuK costs ~20s a call regardless of length, so pack sentences; the local engine is
         # per-token, so short chunks mean the first one is playing while the rest is made
         return self.cfg.max_chunk_seconds if self.engines[:1] == ["auk"] else self.cfg.stream_chunk_seconds
 
-    def speak(self, text: str) -> bool:
+    def _speak_chunked(self, text: str) -> bool:
         """Pipelined: chunk N+1 is synthesized while chunk N plays. Time to first sound is one
         short sentence, not the whole line."""
-        if not self.available():
-            return False
         parts = chunk(text, self.cfg.words_per_second, self._chunk_seconds())
         if not parts:
             return False
@@ -154,6 +199,25 @@ class Voice:
                     pending = pool.submit(self._one, nxt)
                 ok = play(wav, self.cfg.timeout_seconds, self.cfg.sink) and ok
         return ok
+
+
+def write_wav(out: Path, pcm: bytes, rate: int) -> None:
+    with wave.open(str(out), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+
+
+def raw_player(sink: str = "") -> list[str] | None:
+    """Command that plays s16le mono 24 kHz from stdin."""
+    if shutil.which("pw-play"):
+        return ["pw-play", *(["--target", sink] if sink else []),
+                "--raw", "--rate", "24000", "--channels", "1", "--format", "s16", "-"]
+    if shutil.which("paplay"):
+        return ["paplay", *(["--device", sink] if sink else []),
+                "--raw", "--rate=24000", "--channels=1", "--format=s16le"]
+    return None
 
 
 def play(wav: Path, timeout: int, sink: str = "") -> bool:

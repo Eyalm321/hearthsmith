@@ -99,22 +99,26 @@ busy agent is only interrupted when it really is the same thread of work.
 
 He sounds like a dwarf. `assets/voice/dwarf.wav` is 16s of WoW dwarf NPC lines (`dwarf.txt` its
 transcript); a zero-shot cloner says each line in that voice, so the clip *is* the voice — drop
-in another wav (`voice.ref` + `voice.ref_text`) and he is someone else. Two engines, tried in
-order (`voice.engines`), same clip into both:
+in another wav (`voice.ref` + `voice.ref_text`) and he is someone else. Engines, tried in order
+(`voice.engines`), same clip into all of them:
 
+- **pocket** — [Pocket TTS](https://github.com/kyutai-labs/pocket-tts) (Kyutai, 100M, MIT code /
+  CC-BY-4.0 weights). 2 CPU cores, streams PCM straight into `pw-play`: **first sound ~0.2s**,
+  RTF ~0.6 here. Clip only, no transcript. Weights are gated — accept terms once at
+  hf.co/kyutai/pocket-tts. Default.
 - **auk** — [AuK](https://github.com/Tencent-Hunyuan/AuK) (Tencent, MIT) on the
-  [HF space](https://huggingface.co/spaces/tencent/AuK) via `gradio_client`. Best clone. Wants
-  ~17 GiB so it can't run here, and free ZeroGPU quota is ~8 lines/day (`hf auth login` helps;
-  PRO gives 40 min/day).
-- **qwen** — Qwen3-TTS-0.6B-Base (Apache-2.0), warm server in `~/dev/hearthsmith-voice`
-  (`hearthsmith-voice.service`, :7861). fp32 on the 2080 Ti — fp16 NaNs on Turing — ~4 GiB resident,
-  ~6s a line, unloads after 15 min idle. Unlimited.
+  [HF space](https://huggingface.co/spaces/tencent/AuK). Best clone; ~17 GiB so it can't run
+  here, ~8 free lines/day, ~20s a line.
+- **qwen** — Qwen3-TTS-0.6B-Base (Apache-2.0) on the GPU, fp32 (fp16 NaNs on Turing), ~RTF 1.5.
+  Kept for A/B.
 
-Wavs are cached by text+clip+engine under `~/.local/state/hearthsmith/voice/`. Playback is `pw-play`
-to the default sink, blocking, because `hearthsmithd` is a oneshot unit.
+pocket and qwen live in one warm server: `contrib/voice-server` (`hearthsmith-voice.service`,
+:7861); Qwen unloads after 15 min idle, Pocket stays. Wavs are cached by text+clip+engine under
+`~/.local/state/hearthsmith/voice/`. Playback is `pw-play` to the default sink, blocking, because
+`hearthsmithd` is a oneshot unit. Research behind the pick: `docs/research/realtime-clone-tts.md`.
 
 ```sh
-hearthsmith speak "Oi. That ledger's got rust on it."   # hear him; --no-play prints the wav paths
+forge speak "Oi. That ledger's got rust on it."   # hear him; --no-play prints the wav paths
 ```
 
 ## Two bodies, one brain

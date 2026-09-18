@@ -5,7 +5,7 @@ Warm Qwen3-TTS-0.6B-Base voice-clone server on `127.0.0.1:7861`. hearthsmith's `
 
 ```sh
 mkdir -p ~/dev/hearthsmith-voice && cd ~/dev/hearthsmith-voice
-uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python qwen-tts soundfile
+uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python qwen-tts soundfile pocket-tts
 cp ~/dev/hearthsmith/contrib/voice-server/hearthsmith-voice.service ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now hearthsmith-voice.service
 curl -s localhost:7861/api/health

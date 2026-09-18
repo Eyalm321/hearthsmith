@@ -91,12 +91,15 @@ class VoiceCfg:
 
     Engines, tried in order until one speaks; the first refusal in a process sticks so a dead
     engine costs one failed call, not one per line:
+      pocket Kyutai Pocket TTS (100M) on 2 CPU cores in the same warm server. Streams: first
+            sound ~0.2s, faster than realtime. Needs the clip only. Weights are gated on HF
+            (accept terms at hf.co/kyutai/pocket-tts once).
       auk   Tencent AuK on the HF space (gradio_client). Best clone; wants ~17 GiB so it can't
             run here, and free ZeroGPU quota is ~8 lines/day.
       qwen  Qwen3-TTS-0.6B-Base on this box, warm server at `qwen_url` (~/dev/hearthsmith-voice,
             hearthsmith-voice.service). fp32 on the 2080 Ti, ~6s a line, unlimited."""
     enabled: bool = True
-    engines: list[str] = field(default_factory=lambda: ["auk", "qwen"])
+    engines: list[str] = field(default_factory=lambda: ["pocket", "auk", "qwen"])
     # WoW dwarf NPC lines, 16s. A gruff blacksmith should sound like one.
     ref: Path = Path(__file__).resolve().parent.parent.parent / "assets/voice/dwarf.wav"
     ref_text: Path = Path(__file__).resolve().parent.parent.parent / "assets/voice/dwarf.txt"
