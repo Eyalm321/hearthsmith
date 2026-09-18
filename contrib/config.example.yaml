@@ -1,6 +1,6 @@
 # ~/.config/forge/config.yaml — every key optional; see src/forge/config.py
 decide:
-  backend: adapter                 # typesafe | openrouter | adapter | rules
+  backend: openrouter              # openrouter (Jev) | typesafe | adapter | rules
   adapter_model: deepseek/deepseek-v4.1-flash
   adapter_base_url: https://openrouter.ai/api/v1
   adapter_key_env: DSH_OPENROUTER_API_KEY

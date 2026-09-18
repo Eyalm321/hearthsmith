@@ -14,9 +14,9 @@ STATE_DIR = Path(os.environ.get("FORGE_STATE_DIR", Path.home() / ".local/state/f
 
 @dataclass
 class DecideCfg:
-    # "typesafe" (direct, needs TYPESAFE_API_KEY) | "openrouter" (typesafe/jev-1.13, dead as of
-    # 2026-09-17) | "adapter" (MIT system-one-adapter over any OpenAI-compatible model) | "rules"
-    backend: str = "adapter"
+    # "openrouter" (Jev via /api/alpha/decisions, default) | "typesafe" (direct, TYPESAFE_API_KEY)
+    # | "adapter" (MIT system-one-adapter over a chat model, slow) | "rules"
+    backend: str = "openrouter"
     adapter_model: str = "deepseek/deepseek-v4.1-flash"
     adapter_base_url: str = "https://openrouter.ai/api/v1"
     adapter_key_env: str = "DSH_OPENROUTER_API_KEY"

@@ -10,7 +10,7 @@ and can hand a task to a worker pane instead of nagging.
 ```
 timer ─▶ forged heartbeat
           ├─ T0  sense    hyperpanes /state + /projects + pane screens, tasks.md, the store   (no model)
-          ├─ T1  decide   Jev-style typed decision: nag? which task? urgency? channel?        (~100ms / ~free)
+          ├─ T1  decide   Jev typed decision: nag? which task? urgency? channel?              (~400ms / ~$0.00002)
           ├─ T2  compose  Ornith-1.5-9B on a local Ollama writes the blacksmith's line        (free, private)
           ├─ T3  fallback OpenRouter chat model when the local box is asleep
           └─ deliver      notify-send | hyperpanes pane message | delegate to a worker queue
@@ -36,9 +36,9 @@ State: `~/.local/state/forge/` (`forge.db`, `sprite.json`).
 
 | key | what | status |
 |---|---|---|
-| `typesafe` | [TypeSafe Jev](https://typesafe.ai) direct, `TYPESAFE_API_KEY` | needs early-access key |
-| `openrouter` | `typesafe/jev-1.13` via OpenRouter | listed, but 500s on every call (2026-09-17) |
-| `adapter` | MIT [system-one-adapter](https://github.com/typesafe-ai/system-one-adapter-python) over any OpenAI-compatible model | **default** |
+| `openrouter` | [TypeSafe Jev](https://typesafe.ai) via OpenRouter's Decisions router `POST /api/alpha/decisions` (model `typesafe/jev-1.13`) — ~400ms, ~$0.00002/call | **default** |
+| `typesafe` | Jev direct at `api.typesafe.ai`, `TYPESAFE_API_KEY` | needs early-access key |
+| `adapter` | MIT [system-one-adapter](https://github.com/typesafe-ai/system-one-adapter-python) over any OpenAI-compatible chat model (~20s) | last resort |
 | `rules` | overdue + gap heuristics, no model | always-on fallback |
 
 Same `Noul` / `Score` / `Choice` questions in every backend — swapping is a config key.

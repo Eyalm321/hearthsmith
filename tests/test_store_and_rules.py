@@ -36,3 +36,13 @@ def test_rules_respects_gap(tmp_path):
     assert d.should_nag == 0.0 and d.urgency == "now" and d.task_id == t.id
     d = rules([t], last_nag_at=None, min_gap_min=45)
     assert d.should_nag > 0.5
+
+
+def test_wire_shapes():
+    from typesafe_sdk import Choice, Noul, Score
+
+    from forge.decide import _wire
+    assert _wire(Noul(instructions="x")) == {"type": "noul", "instructions": "x"}
+    assert _wire(Score(instructions="x", criteria=["a", "b"])) == {
+        "type": "score", "instructions": "x", "criteria": ["a", "b"]}
+    assert _wire(Choice(instructions="x", criteria={"k": "v"}))["criteria"] == {"k": "v"}

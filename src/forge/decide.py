@@ -1,9 +1,11 @@
 """T1: the decision. State in, typed answers out. One interface, four backends:
 
-  typesafe    TypeSafeClient → api.typesafe.ai (Jev proper; needs TYPESAFE_API_KEY)
-  openrouter  TypeSafeClient pointed at openrouter.ai, model typesafe/jev-1.13
-              (registered but every call 500s as of 2026-09-17 — kept for when it wakes up)
-  adapter     MIT system-one-adapter over any OpenAI-compatible chat model (default today)
+  openrouter  Jev via OpenRouter's Decisions router — POST /api/alpha/decisions (default).
+              Undocumented outside openrouter.ai/openapi.json; ~400ms, ~$0.00002/call.
+              NOT /chat/completions (500s) and the TypeSafe SDK can't target it (hardcodes
+              /v1/systemone), so this is a raw httpx call.
+  typesafe    TypeSafeClient → api.typesafe.ai (needs TYPESAFE_API_KEY)
+  adapter     MIT system-one-adapter over any OpenAI-compatible chat model (~20s; last resort)
   rules       no model at all; overdue + gap heuristics. Also the fallback when a backend errors.
 
 The questions are the same Noul/Score/Choice objects in every case, so swapping backends is a
@@ -17,6 +19,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
+import httpx
 from typesafe_sdk import Choice, Noul, Score
 
 from forge.config import DecideCfg
@@ -81,16 +84,39 @@ def _from_answers(ans, candidates: list[Task], backend: str) -> Decision:
 
 # -- backends ------------------------------------------------------------------------------
 
-def _typesafe(cfg: DecideCfg, state: str, cands: list[Task], via_openrouter: bool) -> Decision:
+def _wire(q) -> dict:
+    """Noul/Score/Choice → the JSON the Decisions router expects."""
+    kind = type(q).__name__.lower()
+    d = {"type": kind, "instructions": q.instructions}
+    if q.criteria is not None:
+        d["criteria"] = q.criteria
+    return d
+
+
+def _openrouter(cfg: DecideCfg, state: str, cands: list[Task]) -> Decision:
+    r = httpx.post(f"{cfg.adapter_base_url.rstrip('/').removesuffix('/v1')}/alpha/decisions",
+                   timeout=15.0,
+                   headers={"Authorization": f"Bearer {os.environ[cfg.adapter_key_env]}"},
+                   json={"model": cfg.openrouter_slug, "state": state,
+                         "questions": {k: _wire(v) for k, v in questions(cands).items()},
+                         "session_id": "forge"})
+    r.raise_for_status()
+    body = r.json()
+
+    class A:  # duck-typed like SDK answers: .noul / .score / .choice / .probabilities
+        def __init__(self, d): self.__dict__.update(d)
+    ans = {k: A(v) for k, v in body["answers"].items()}
+    d = _from_answers(ans, cands, "openrouter")
+    d.raw["usage"] = body.get("usage")
+    d.raw["model"] = body.get("model")
+    return d
+
+
+def _typesafe(cfg: DecideCfg, state: str, cands: list[Task]) -> Decision:
     from typesafe_sdk import TypeSafeClient
-    if via_openrouter:
-        client = TypeSafeClient(api_key=os.environ[cfg.adapter_key_env],
-                                base_url=cfg.adapter_base_url, model=cfg.openrouter_slug)
-    else:
-        client = TypeSafeClient()  # TYPESAFE_API_KEY from env
-    with client:
+    with TypeSafeClient() as client:  # TYPESAFE_API_KEY from env
         r = client.system_one(state=state, questions=questions(cands))
-    return _from_answers(r.answers, cands, "openrouter" if via_openrouter else "typesafe")
+    return _from_answers(r.answers, cands, "typesafe")
 
 
 def _adapter(cfg: DecideCfg, state: str, cands: list[Task]) -> Decision:
@@ -125,10 +151,10 @@ def rules(cands: list[Task], last_nag_at: int | None, min_gap_min: int) -> Decis
 def decide(cfg: DecideCfg, state: str, cands: list[Task], last_nag_at: int | None,
            min_gap_min: int) -> Decision:
     try:
-        if cfg.backend == "typesafe":
-            return _typesafe(cfg, state, cands, via_openrouter=False)
         if cfg.backend == "openrouter":
-            return _typesafe(cfg, state, cands, via_openrouter=True)
+            return _openrouter(cfg, state, cands)
+        if cfg.backend == "typesafe":
+            return _typesafe(cfg, state, cands)
         if cfg.backend == "adapter":
             return _adapter(cfg, state, cands)
     except Exception as e:  # noqa: BLE001 — any backend failure degrades to rules, never to silence
