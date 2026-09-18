@@ -46,3 +46,14 @@ def test_wire_shapes():
     assert _wire(Score(instructions="x", criteria=["a", "b"])) == {
         "type": "score", "instructions": "x", "criteria": ["a", "b"]}
     assert _wire(Choice(instructions="x", criteria={"k": "v"}))["criteria"] == {"k": "v"}
+
+
+def test_route_falls_back_to_store_when_decider_down(tmp_path, monkeypatch):
+    from forge import config as c
+    from forge.route import route
+    cfg = c.Config(db_path=tmp_path / "t.db", sprite_path=tmp_path / "s.json")
+    cfg.nag.markdown_file = None
+    cfg.hyperpanes.control_file = tmp_path / "nope.json"
+    monkeypatch.delenv(cfg.decide.adapter_key_env, raising=False)
+    r = route("buy coal", cfg)
+    assert r.intent == "add" and r.task_id and "buy coal" in r.text

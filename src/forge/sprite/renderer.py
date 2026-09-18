@@ -139,23 +139,84 @@ class Sprite(Gtk.Window):
         win = self.get_window()
         if not win:
             return
-        if locked:
-            win.input_shape_combine_region(cairo.Region(), 0, 0)  # click-through
-        else:
-            sw, sh = self.sprite_size()
-            win.input_shape_combine_region(
-                cairo.Region(cairo.RectangleInt(0, self.bubble_h, sw, sh)), 0, 0)
+        sw, sh = self.sprite_size()
+        # the body is always clickable (locked: click = talk; unlocked: drag); the rest passes through
+        win.input_shape_combine_region(
+            cairo.Region(cairo.RectangleInt(0, self.bubble_h, sw, sh)), 0, 0)
 
     # -- interaction (unlocked only) -----------------------------------------------------------
 
     def on_button(self, _w, ev) -> bool:
         if self.locked:
-            return False
+            if ev.button == 1:
+                self.open_prompt()
+            elif ev.button == 3:
+                save_avatar_cfg({"locked": False})
+            return True
         if ev.button == 1:
             self.begin_move_drag(ev.button, int(ev.x_root), int(ev.y_root), ev.time)
         elif ev.button == 3:
             save_avatar_cfg({"locked": True})
         return True
+
+    # -- talk to him ---------------------------------------------------------------------------
+
+    def open_prompt(self) -> None:
+        if getattr(self, "_prompt", None):
+            self._prompt.present()
+            return
+        w = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+        w.set_decorated(False)
+        w.set_keep_above(True)
+        w.set_skip_taskbar_hint(True)
+        w.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+        w.set_default_size(340, 36)
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("Tell the smith…  (Enter to send, Esc to close)")
+        entry.set_size_request(340, 36)
+        w.add(entry)
+        x, y = self.get_position()
+        sw, sh = self.sprite_size()
+        w.move(x + sw + 8, y + self.bubble_h + sh - 40)
+        entry.connect("activate", lambda e: self._submit(e.get_text()))
+        w.connect("key-press-event", lambda _w, ev: self._close_prompt() if ev.keyval == Gdk.KEY_Escape else False)
+        w.connect("focus-out-event", lambda *_: self._close_prompt())
+        w.connect("destroy", lambda *_: setattr(self, "_prompt", None))
+        self._prompt = w
+        w.show_all()
+        entry.grab_focus()
+
+    def _close_prompt(self) -> bool:
+        if getattr(self, "_prompt", None):
+            self._prompt.destroy()
+            self._prompt = None
+        return True
+
+    def _submit(self, text: str) -> None:
+        text = text.strip()
+        self._close_prompt()
+        if not text:
+            return
+        self.state, self.frame = "forge", 0
+        self.text, self.text_until = "…", time.time() + 60
+        import subprocess
+        import threading
+
+        def run():
+            try:
+                out = subprocess.run([str(Path.home() / "dev/forge/.venv/bin/forge"), "say", "--json", text],
+                                     capture_output=True, text=True, timeout=120)
+                r = json.loads(out.stdout.strip().splitlines()[-1]) if out.stdout.strip() else \
+                    {"intent": "error", "text": (out.stderr or "no reply").strip()[-160:]}
+            except Exception as e:  # noqa: BLE001
+                r = {"intent": "error", "text": f"{type(e).__name__}: {e}"[:160]}
+            GLib.idle_add(self._show_reply, r)
+        threading.Thread(target=run, daemon=True).start()
+
+    def _show_reply(self, r: dict) -> bool:
+        self.text, self.text_until = f"[{r['intent']}] {r['text']}", time.time() + 45
+        self.state, self.frame = ("alert" if r["intent"] in ("nag",) else "idle"), 0
+        return False
 
     def on_scroll(self, _w, ev) -> bool:
         if self.locked:
@@ -229,6 +290,8 @@ class Sprite(Gtk.Window):
             cr.stroke()
             cr.set_dash([])
             self._label(cr, 4, oy - 6, f"drag · scroll={self.scale:.1f}x · right-click locks")
+        elif not self.text:
+            pass
         if self.text:
             self._bubble(cr, sw + 8, oy + 8, BUBBLE_W - 12, self.text)
         return True
