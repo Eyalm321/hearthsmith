@@ -70,6 +70,22 @@ Not built yet. The daemon writes `sprite.json` (`state ∈ idle | forge | alert 
 `urgency`); the renderer is a separate process. Plan: layered spritesheets + palette LUT so the
 blacksmith is customizable without new art.
 
+## Two bodies, one brain
+
+Jev decides; where the hands are depends on the job.
+
+| errand | body |
+|---|---|
+| anything in a web page | **his Chrome** — [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (MIT) over CDP |
+| everything else | **your desktop** — AT-SPI + uinput, quiet by default |
+
+Inside a page a DOM snapshot wins and it isn't close: the page owns its state machine and
+ignores anything that isn't a real DOM event, so a site like Google Flights beats synthetic
+input. Two upstream lines are wrapped rather than forked — decisions go to the OpenRouter
+Decisions router (the Jev access this machine has), and the tab opens in the foreground so you
+can watch. He gets his own Chrome profile because Chrome 136+ refuses remote debugging on the
+default one; `forge web "<goal>"` runs it directly, and the `browse` intent routes there.
+
 ## Computer use
 
 He works in **your** apps, on screen — no headless browser, no remote-debugging ports, no

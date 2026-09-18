@@ -15,6 +15,10 @@ hyperpanes:
 desktop:
   hands: false                 # true = he may use the real mouse/keyboard (exclusive)
   verify: true                 # one screenshot + vision check before reporting success
+browser:
+  binary: google-chrome-stable  # his own Chrome (136+ refuses remote debugging on the default profile)
+  cdp_port: 9222
+  autostart: true
 nag:
   min_gap_minutes: 45
   quiet_hours: [23, 8]

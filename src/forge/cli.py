@@ -37,6 +37,7 @@ def main() -> None:
     br = sub.add_parser("browse", help="Jev drives your Firefox toward a goal"); br.add_argument("goal", nargs="+"); br.add_argument("--json", action="store_true")
     do = sub.add_parser("do", help="computer use: Jev drives any app (AT-SPI + uinput)"); do.add_argument("goal", nargs="+"); do.add_argument("--json", action="store_true"); do.add_argument("--dry", action="store_true"); do.add_argument("--hands", action="store_true", help="let him use the real mouse/keyboard (exclusive — you two share one cursor)")
     sub.add_parser("windows", help="what the smith can see on screen")
+    bw = sub.add_parser("web", help="run a goal in his Chrome (jev-ultrafast over CDP)"); bw.add_argument("goal", nargs="+"); bw.add_argument("--json", action="store_true")
     sy = sub.add_parser("say", help="tell the blacksmith something; Jev routes it"); sy.add_argument("text", nargs="+"); sy.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -68,6 +69,11 @@ def main() -> None:
         r = run(" ".join(args.goal), cfg, dry=args.dry, hands=args.hands or None)
         print(json.dumps(r.__dict__) if args.json else
               ("done" if r.ok else f"not done ({r.note})") + f" @ {r.window}\n  " + "\n  ".join(r.steps))
+    elif args.cmd == "web":
+        from forge.browser import jev
+        r = jev.run(" ".join(args.goal), cfg=cfg)
+        print(json.dumps(r.__dict__) if args.json else
+              ("done" if r.ok else f"not done ({r.note})") + f" in {r.elapsed_ms}ms @ {r.title or r.url}")
     elif args.cmd == "windows":
         from forge.desktop import atspi
         for w in atspi.windows():

@@ -65,6 +65,17 @@ class DesktopCfg:
 
 
 @dataclass
+class BrowserCfg:
+    """His own Chrome. Browser errands run here (jev-ultrafast + CDP beats the accessibility
+    tree inside a page); everything else stays on AT-SPI in whatever app you have open."""
+    binary: str = "google-chrome-stable"
+    # Chrome 136+ refuses remote debugging on the default profile, so he gets his own.
+    profile: Path = Path.home() / ".config/forge/chrome"
+    cdp_port: int = 9222
+    autostart: bool = True
+
+
+@dataclass
 class NagCfg:
     min_gap_minutes: int = 45
     quiet_hours: tuple[int, int] = (23, 8)  # local; no nags from 23:00 to 08:00
@@ -79,6 +90,7 @@ class Config:
     compose: ComposeCfg = field(default_factory=ComposeCfg)
     hyperpanes: HyperpanesCfg = field(default_factory=HyperpanesCfg)
     desktop: DesktopCfg = field(default_factory=DesktopCfg)
+    browser: BrowserCfg = field(default_factory=BrowserCfg)
     nag: NagCfg = field(default_factory=NagCfg)
     db_path: Path = STATE_DIR / "forge.db"
     sprite_path: Path = STATE_DIR / "sprite.json"

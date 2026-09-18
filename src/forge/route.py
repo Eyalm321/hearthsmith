@@ -107,6 +107,19 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         return Reply("add", f"Noted '{text}'. (decider down: {type(e).__name__})", t.id)
 
     raw = {"answers": a}
+    if intent == "browse":
+        # Inside a page a DOM snapshot beats the accessibility tree; his Chrome handles the web.
+        from forge.browser import jev
+        if jev.available():
+            j = jev.run(text, cfg=cfg)
+            if j.ok:
+                return Reply(intent, f"Done — {j.title or j.url or 'in Chrome'}.",
+                             raw={**raw, "steps": j.steps, "ms": j.elapsed_ms})
+            if j.note and "isn't reachable" not in j.note:
+                return Reply(intent, f"Couldn't finish in the browser ({j.note}).",
+                             raw={**raw, "steps": j.steps})
+        # no Chrome: fall through to the desktop body rather than refusing outright
+
     if intent in ("browse", "desktop"):
         from forge.desktop.agent import run
         b = run(text, cfg)

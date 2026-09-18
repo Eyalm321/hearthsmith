@@ -11,6 +11,8 @@ dependencies = [
     "system-one-adapter[openai]>=0.1.4",
     "typesafe-sdk>=0.6",
     "pyyaml>=6",
+    # his browser body: a DOM snapshot + CDP beats AT-SPI inside a page
+    "jev-ultrafast @ git+https://github.com/browser-use/jev-ultrafast",
 ]
 
 [project.scripts]
