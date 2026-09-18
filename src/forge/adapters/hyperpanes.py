@@ -132,8 +132,10 @@ class Hyperpanes:
             r = c.post(f"/panes/{pane_id}/messages", json={"from": "forge", "body": text})
             return r.status_code < 300
 
-    def type_into(self, pane_id: str, text: str) -> bool:
-        if not self.allow_pane_input:
+    def type_into(self, pane_id: str, text: str, user_originated: bool = False) -> bool:
+        """Keystrokes into the pane. Off for the daemon's own nags; allowed for text the user
+        typed themselves (forge say), which is them talking to that agent through the smith."""
+        if not (self.allow_pane_input or user_originated):
             raise PermissionError("pane input disabled (hyperpanes.allow_pane_input)")
         with self._client() as c:
             r = c.post(f"/panes/{pane_id}/input", json={"data": text, "submit": True})

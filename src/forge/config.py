@@ -48,6 +48,9 @@ class HyperpanesCfg:
     # off until something drains the queue (`hyperpanes worker --queue forge -- ...`); otherwise
     # a "delegate" decision marks the task delegated and nothing ever happens
     delegate_enabled: bool = False
+    # `forge say` routed to a pane: type into the agent's prompt when it is idle (it acts now);
+    # a busy pane gets an inbox message instead (it sees it on its next read_messages)
+    say_types_into_idle_pane: bool = True
 
 
 @dataclass

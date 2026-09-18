@@ -116,10 +116,18 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
     if intent == "pane" and "pane" in a and snap:
         pane_id = a["pane"]["choice"]
         pane = next((p for p in snap.panes if p.id == pane_id), None)
-        if pane and hp.message(pane_id, f"[from the forge] {text}"):
-            t = store.add(text, project=(snap.project_for_cwd(pane.cwd) or {}).get("name"))
-            store.set_state(t.id, "delegated")
-            return Reply(intent, f"Sent to '{pane.label}'.", t.id, pane_id, raw)
+        if pane:
+            proj = (snap.project_for_cwd(pane.cwd) or {}).get("name")
+            if pane.activity != "busy" and cfg.hyperpanes.say_types_into_idle_pane:
+                if hp.type_into(pane_id, text, user_originated=True):
+                    t = store.add(text, project=proj)
+                    store.set_state(t.id, "delegated")
+                    return Reply(intent, f"Told '{pane.label}' — it's on it.", t.id, pane_id, raw)
+            if hp.message(pane_id, f"[from the forge] {text}"):
+                t = store.add(text, project=proj)
+                store.set_state(t.id, "delegated")
+                return Reply(intent, f"'{pane.label}' is busy — left it in its inbox; it'll see it "
+                             "when it checks messages.", t.id, pane_id, raw)
         intent = "delegate"  # fall through
 
     if intent == "delegate":
