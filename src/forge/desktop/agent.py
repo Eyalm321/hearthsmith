@@ -51,6 +51,7 @@ KEYS = {"ctrl+l": "focus the address/search bar", "ctrl+t": "new browser tab", "
 URL_RE = re.compile(r"\b((?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?)", re.IGNORECASE)
 SITE_RE = re.compile(r"\b(?:go to|open|navigate to|visit)\s+([a-z0-9][a-z0-9-]{1,40})\b", re.IGNORECASE)
 QUOTED = re.compile(r"[\"'“”‘’]([^\"'“”‘’]{1,120})[\"'“”‘’]")
+BROWSERS = ("firefox", "chromium", "google-chrome", "chrome", "brave-browser")
 APPS = {"firefox": "firefox", "files": "nautilus", "nautilus": "nautilus", "terminal": "ptyxis",
         "settings": "gnome-control-center", "chrome": "google-chrome"}
 
@@ -94,17 +95,32 @@ def _goal_url(goal: str) -> str | None:
     return None
 
 
-def _fill_value(cfg: config.Config, goal: str, field_desc: str) -> str:
-    """Only reached when the operation is `type`. Quoted text in the goal wins; an address bar
-    gets the URL; otherwise a small model writes the value and nothing else."""
-    if m := QUOTED.search(goal):
-        return m.group(1)
+DATE_FIELD = re.compile(r"\b(departure|depart|return|date|check.?in|check.?out|when)\b", re.IGNORECASE)
+DATE_IN_GOAL = re.compile(
+    r"\b(\d{4}-\d{2}-\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}"
+    r"(?:,?\s+\d{4})?|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
+    r"(?:,?\s+\d{4})?)\b", re.IGNORECASE)
+
+
+def _fill_value(cfg: config.Config, goal: str, field_desc: str, filled: dict | None = None) -> str:
+    """Only reached when the operation is `type`. A quoted phrase, an address for the address
+    bar, a date for a date field; otherwise a small model writes the value — and it is told what
+    has already been entered, or it happily puts the origin city in the departure date."""
+    filled = filled or {}
     low = field_desc.lower()
     if ("address" in low or "url" in low or "location" in low) and (u := _goal_url(goal)):
         return u
+    if DATE_FIELD.search(low) and (m := DATE_IN_GOAL.search(goal)):
+        return m.group(1)
+    if (m := QUOTED.search(goal)) and m.group(1) not in filled.values():
+        return m.group(1)
     from forge.compose import _ollama, _openrouter
-    msgs = [{"role": "system", "content": "Reply with ONLY the exact text to type. No quotes, no prose."},
-            {"role": "user", "content": f"Goal: {goal}\nField: {field_desc}\nWhat should be typed?"}]
+    done = ("Already entered: " + "; ".join(f"{k} = {v}" for k, v in filled.items())
+            if filled else "Nothing entered yet.")
+    msgs = [{"role": "system", "content": "Reply with ONLY the exact text to type in the named "
+             "field. No quotes, no prose, never repeat a value already entered elsewhere."},
+            {"role": "user", "content": f"Goal: {goal}\n{done}\nField to fill: {field_desc}\n"
+                                        "What should be typed?"}]
     out = _ollama(cfg.compose, msgs) or _openrouter(cfg.compose, msgs) or ""
     return out.strip().strip('"').splitlines()[0] if out else goal
 
@@ -216,15 +232,17 @@ def _pointer_pos() -> tuple[int, int] | None:
 
 
 ADDRESS_BAR = ("search with google or enter address", "address", "url", "location bar")
+KEYBOARD_NOTE = ("uinput types by pasting, so a page that listens for real keystrokes "
+                 "(most autocompletes) still won't see them")
 
 
 def _questions(els, wins, win, nav_url: str | None = None, hands: bool = False) -> dict:
     """Speculative heads: every target head holds only elements that operation can act on."""
     clickable = [e for e in els if not e.fillable]
     fillable = [e for e in els if e.fillable]
-    if nav_url:
-        # navigating is strictly better than typing an address: no keyboard, no submit guessing
-        fillable = [e for e in fillable if not any(k in e.name.lower() for k in ADDRESS_BAR)]
+    # The address bar is never the right target: `navigate` opens URLs without typing, and a
+    # search box on the page is a better target for a query.
+    fillable = [e for e in fillable if not any(k in e.name.lower() for k in ADDRESS_BAR)]
     others = [w for w in wins if w is not win]
     ops = {k: v for k, v in OPS.items()
            if not (k == "click" and not clickable) and not (k == "type" and not fillable)
@@ -264,6 +282,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
     expected_ptr = None
     stale_retries = 0
     visited: list[str] = []
+    filled: dict[str, str] = {}
     try:
         for _ in range(max_steps):
             pos = _pointer_pos() if (expected_ptr and not dry) else None
@@ -294,8 +313,20 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                      "windows_on_screen_without_accessibility": opaque[:12],
                      "steps_so_far": res.steps[-6:],
                      "elements": {str(e.i): e.desc() for e in els}}
-            in_browser = bool(win and win.app.lower() in ("firefox", "chromium", "google-chrome",
-                                                          "chrome", "brave-browser"))
+            in_browser = bool(win and win.app.lower() in BROWSERS)
+            # A web errand belongs in the browser. Asking the decider to "focus" its way there
+            # wastes a cycle and invites wandering into whatever else is open.
+            browser = next((w for w in wins if w.app.lower() in BROWSERS), None)
+            if (not in_browser and browser and _navigate_url(goal, cfg, True)
+                    and not _launch_target(goal)):
+                if True:
+                    if not dry and browser.shell_id:
+                        atspi.activate_window(browser.shell_id)
+                        time.sleep(0.4)
+                    res.steps.append(f"focus {browser.app}")
+                    win, in_browser = browser, True
+                    els = atspi.elements(win, limit=70)
+                    res.window = f"{win.app}: {win.title}"
             nav_url = _navigate_url(goal, cfg, in_browser)
             if nav_url in visited or len(visited) >= 2:
                 nav_url = None          # already went there; work with the page you have
@@ -417,11 +448,15 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                     stale_retries = 0
 
                 if op == "type":
-                    val = _fill_value(cfg, goal, tgt.desc())
+                    val = _fill_value(cfg, goal, tgt.desc(), filled)
+                    filled[tgt.name or tgt.role] = val
                     step = f"type into '{tgt.desc()}': {val!r}"
                     if not dry:
                         if atspi.set_text(tgt, val):                    # quiet: no keyboard
-                            if atspi.submit_near(tgt, els):
+                            # an autocomplete wants its suggestion picked, not a button pressed
+                            if picked := atspi.pick_suggestion(win, val):
+                                step += f" → {picked}"
+                            elif atspi.submit_near(tgt, els):
                                 step += " + Search"
                             elif kb:
                                 kb.tap("enter")
@@ -435,7 +470,8 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                             kb.type_text(val, enter=True)
                             step += " + Enter (mouse)"
                         else:
-                            res.note = f"'{tgt.desc()}' won't take text quietly — rerun with --hands"
+                            res.note = (f"'{tgt.desc()}' ignored the quiet fill (the page wants "
+                                        "real typing) — rerun with --hands")
                             return res
                         # a combobox that pops suggestions gets its moment, a fast one costs 50ms
                         atspi.wait_settled(win, before, cap_ms=600)

@@ -196,7 +196,10 @@ def elements(win: Window, limit: int = 80, max_depth: int = 40) -> list[Element]
                 continue
             kids.append(c)
         for c in reversed(kids):
-            if depth < max_depth:
+            # Prune hidden subtrees. A browser keeps every background tab's document in the
+            # tree; descending into them burns the budget before the visible page is reached —
+            # which is why a 14-tab window used to report nothing but chrome.
+            if depth < max_depth and _showing(c):
                 stack.append((c, depth + 1))
         for c in kids:
             try:
@@ -288,6 +291,30 @@ def submit_near(el: Element, els: list[Element]) -> bool:
         if any(w in e.name.lower() for w in words) and do_action(e):
             return True
     return False
+
+
+def read_text(el: Element, limit: int = 120) -> str:
+    try:
+        tx = el.acc.queryText()
+        return tx.getText(0, min(tx.characterCount, limit))
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def pick_suggestion(win: Window, typed: str, cap_ms: int = 900) -> str | None:
+    """After filling an autocomplete, choose the option it offers. Waits briefly for the list to
+    appear, then activates the best match — the quiet equivalent of arrow-down + Enter."""
+    import time as _t
+    want = typed.lower().strip()
+    deadline = _t.time() + cap_ms / 1000
+    while _t.time() < deadline:
+        _t.sleep(0.1)
+        opts = [e for e in elements(win, limit=120)
+                if e.role in ("list item", "menu item", "option") and e.name]
+        hit = next((e for e in opts if want in e.name.lower()), None)
+        if hit and do_action(hit):
+            return hit.name[:60]
+    return None
 
 
 def fresh(el: Element, win: Window, tol: int = 6) -> Element | None:
