@@ -188,7 +188,11 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         # Inside a page a DOM snapshot beats the accessibility tree; his Chrome handles the web.
         from forge.browser import jev
         if jev.available():
+            started = int(time.time())
             j = jev.run(text, cfg=cfg)
+            store.record_run(text, "browser", j.ok, j.steps, note=j.note,
+                             target=j.url or j.title, decide_ms=j.decide_ms, seen=j.seen,
+                             started_at=started)
             if j.ok:
                 return Reply(intent, f"Done — {j.title or j.url or 'in Chrome'}.",
                              raw={**raw, "steps": j.steps, "ms": j.elapsed_ms})
@@ -199,7 +203,10 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
 
     if intent in ("browse", "desktop"):
         from forge.desktop.agent import run
+        started = int(time.time())
         b = run(text, cfg)
+        store.record_run(text, "desktop", b.ok, b.steps, note=b.note, target=b.window,
+                         seen=b.seen, started_at=started)
         if b.ok:
             return Reply(intent, f"Done — {b.window}." if b.window else "Done.", raw={**raw, "steps": b.steps})
         return Reply(intent, f"Couldn't finish ({b.note}). Was in {b.window or 'nowhere'}.",
@@ -222,6 +229,9 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
             if pane and hp.type_into(pane_id, brief_for_place, user_originated=True):
                 t = store.add(brief_for_place, project=proj)
                 store.set_state(t.id, "delegated")
+                store.record_run(brief_for_place, "pane", True,
+                                 [f"handed to '{pane.label}' (already on this work)"],
+                                 task_id=t.id, target=pane_id)
                 return Reply("pane", f"'{pane.label}' is already on that — handed it over.",
                              t.id, pane_id, raw)
         intent = "spawn"
@@ -242,6 +252,9 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
             ready = hp.wait_ready(pane_id)
             if ready and hp.type_into(pane_id, brief, user_originated=True):
                 where = Path(cwd).name or cwd
+                store.record_run(brief, "spawn", True,
+                                 [f"opened a pane in {cwd}", "answered the folder-trust prompt",
+                                  "typed the assignment"], task_id=t.id, target=pane_id)
                 return Reply(intent, f"Opened a pane in {where} and set it on it: {_label(brief)}.",
                              t.id, pane_id, raw)
             return Reply(intent, "Opened a pane — it's still starting, so I left the brief for "

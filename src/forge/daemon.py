@@ -127,6 +127,9 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
         sprite.write("alert" if d.urgency == "now" else "forge", text, d.urgency)
     store.mark_nagged(task.id)
     store.log_nag(task.id, ",".join(delivered) or "none", d.urgency, text, d.as_json())
+    store.record_run(f"nag about {task.title}", "nag", bool(delivered),
+                     [f"{d.backend} decided {d.urgency}", f"said: {text[:120]}"],
+                     task_id=task.id, target=",".join(delivered) or "nobody")
     result["delivered"] = delivered
     return result
 

@@ -35,6 +35,23 @@ CREATE TABLE IF NOT EXISTS nags (
   text      TEXT NOT NULL,
   decision  TEXT NOT NULL                     -- json blob of the Jev/adapter answers
 );
+-- What he actually did, so "what happened with that task?" is a query and not an archaeology
+-- dig through a terminal's scrollback.
+CREATE TABLE IF NOT EXISTS runs (
+  id        TEXT PRIMARY KEY,
+  at        INTEGER NOT NULL,
+  ended_at  INTEGER,
+  task_id   TEXT,
+  goal      TEXT NOT NULL,
+  body      TEXT NOT NULL,      -- browser | desktop | spawn | pane | nag
+  ok        INTEGER NOT NULL DEFAULT 0,
+  note      TEXT NOT NULL DEFAULT '',
+  target    TEXT,               -- pane id, url, window — whatever it acted on
+  steps     TEXT NOT NULL DEFAULT '[]',
+  decide_ms TEXT NOT NULL DEFAULT '[]',
+  seen      TEXT NOT NULL DEFAULT ''   -- what the verifier saw, when it looked
+);
+CREATE INDEX IF NOT EXISTS runs_at ON runs(at DESC);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 """
 
@@ -134,6 +151,39 @@ class Store:
         if task_id:
             self.db.execute("UPDATE tasks SET nag_count=nag_count+1, last_nag_at=? WHERE id=?",
                             (int(time.time()), task_id))
+
+    # -- runs ------------------------------------------------------------------------------
+
+    def record_run(self, goal: str, body: str, ok: bool, steps: list[str],
+                   task_id: str | None = None, note: str = "", target: str | None = None,
+                   decide_ms: list | None = None, seen: str = "",
+                   started_at: int | None = None) -> str:
+        """One row per thing he was asked to do, with the steps he took. Values he was given by
+        the user are already masked upstream ("(from you)") — nothing secret reaches here."""
+        import json as _json
+        rid = uuid.uuid4().hex[:12]
+        now = int(time.time())
+        self.db.execute(
+            "INSERT INTO runs (id,at,ended_at,task_id,goal,body,ok,note,target,steps,decide_ms,seen)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (rid, started_at or now, now, task_id, goal, body, int(ok), note, target,
+             _json.dumps(steps), _json.dumps(decide_ms or []), seen))
+        return rid
+
+    def runs(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+        q = "SELECT * FROM runs"
+        args: list = []
+        if task_id:
+            q += " WHERE task_id=?"
+            args.append(task_id)
+        q += " ORDER BY at DESC LIMIT ?"
+        args.append(n)
+        return [dict(r) for r in self.db.execute(q, args)]
+
+    def run(self, run_id: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM runs WHERE id=? OR id LIKE ?",
+                              (run_id, run_id + "%")).fetchone()
+        return dict(row) if row else None
 
     # -- nag log + kv ----------------------------------------------------------------------
 

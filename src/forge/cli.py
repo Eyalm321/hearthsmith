@@ -32,6 +32,7 @@ def main() -> None:
     sn = sub.add_parser("snooze"); sn.add_argument("task_id"); sn.add_argument("--minutes", type=int, default=120)
     sub.add_parser("state", help="print the T0 state paragraph the decider sees")
     sub.add_parser("nags")
+    rr = sub.add_parser("runs", help="what he did, and the steps he took"); rr.add_argument("run_id", nargs="?"); rr.add_argument("-n", type=int, default=12); rr.add_argument("--task")
     mu = sub.add_parser("mute", help="stop all nagging for a while"); mu.add_argument("minutes", type=int, nargs="?", default=60)
     sub.add_parser("unmute")
     br = sub.add_parser("browse", help="Jev drives your Firefox toward a goal"); br.add_argument("goal", nargs="+"); br.add_argument("--json", action="store_true")
@@ -94,6 +95,29 @@ def main() -> None:
         r = route(" ".join(args.text), cfg)
         print(json.dumps({"intent": r.intent, "text": r.text, "task_id": r.task_id, "target": r.target}) if args.json
               else f"[{r.intent}] {r.text}")
+    elif args.cmd == "runs":
+        if args.run_id:
+            r = store.run(args.run_id)
+            if not r:
+                print("no such run")
+            else:
+                print(f"{datetime.fromtimestamp(r['at']):%m-%d %H:%M}  {r['body']}  "
+                      f"{'done' if r['ok'] else 'not done'}  {r['note']}")
+                print(f"  goal: {r['goal']}")
+                if r["target"]:
+                    print(f"  on:   {r['target'][:100]}")
+                for s in json.loads(r["steps"]):
+                    print("   ", s)
+                if lat := json.loads(r["decide_ms"]):
+                    import statistics
+                    print(f"  decisions: {len(lat)}, median {statistics.median(lat):.0f}ms")
+                if r["seen"]:
+                    print(f"  looked: {r['seen'][:160]}")
+        else:
+            for r in store.runs(args.n, args.task):
+                mark = "✓" if r["ok"] else "×"
+                print(f"{r['id']}  {datetime.fromtimestamp(r['at']):%m-%d %H:%M}  {mark} "
+                      f"{r['body']:<8} {len(json.loads(r['steps'])):>2} steps  {r['goal'][:60]}")
     elif args.cmd == "nags":
         for n in store.recent_nags(10):
             print(f"{datetime.fromtimestamp(n['at']):%m-%d %H:%M}  {n['urgency']:<9} {n['channel']:<10} {n['text']}")

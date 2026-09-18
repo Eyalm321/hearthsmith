@@ -4,6 +4,7 @@ can reach it. Import applies the patches; `run()` is the whole API."""
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 
 from forge import config
@@ -139,7 +140,19 @@ def available() -> bool:
 
 
 def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
-        max_seconds: float = 90.0) -> Result:
+        max_seconds: float = 90.0, attempts: int = 2) -> Result:
+    """A page that is still navigating when the agent attaches raises StalePage out of the loop;
+    that is a timing accident, not a failure, so it is worth one more go."""
+    for i in range(attempts):
+        res = _run_once(goal, url, cfg, max_seconds)
+        if res.ok or "stalepage" not in res.note.lower():
+            return res
+        time.sleep(1.5)
+    return res
+
+
+def _run_once(goal: str, url: str | None = None, cfg: config.Config | None = None,
+              max_seconds: float = 90.0) -> Result:
     """Drive Chrome toward `goal`. `url` is the page to start from; without one the goal's own
     address (or a search for it) is used, the same resolution the desktop agent does."""
     cfg = cfg or config.load()
