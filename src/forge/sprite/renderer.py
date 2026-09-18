@@ -249,6 +249,7 @@ class Sprite(Gtk.Window):
         self._pix: dict[tuple[Path, int], GdkPixbuf.Pixbuf] = {}
         self.state, self.frame, self.text, self.text_until = "idle", 0, "", 0.0
         self._state_mtime = self._cfg_mtime = 0.0
+        self._frame_at = 0.0
         self.cfg: dict = {}
         self._suppress_save = 0.0
         self._press: tuple[int, int, int] | None = None  # x_root, y_root, time
@@ -279,7 +280,7 @@ class Sprite(Gtk.Window):
         self.connect("motion-notify-event", self.on_motion)
         self.connect("configure-event", self.on_configure)
         self.connect("realize", lambda *_: self._apply_cfg(force=True))
-        GLib.timeout_add(250, self._tick)
+        GLib.timeout_add(100, self._tick)
 
     # -- geometry ------------------------------------------------------------------------------
 
@@ -537,8 +538,10 @@ class Sprite(Gtk.Window):
         except (OSError, ValueError):
             pass
         fps = (self.pack.fps if self.pack else procedural.FPS).get(self.state, 1)
-        if time.time() * fps - int(time.time() * fps) < 0.25:
+        now = time.time()
+        if now - self._frame_at >= 1.0 / max(fps, 0.1):
             self.frame += 1
+            self._frame_at = now
         if self.text and time.time() > self.text_until:
             self.text = ""
             if self.state in ("forge", "alert"):
