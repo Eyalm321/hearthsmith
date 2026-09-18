@@ -174,40 +174,37 @@ class Bubble(Gtk.Window):
                 else:
                     k = "f"
                 g[(ox + x, oy + y)] = k
-        # tail: stepped wedge, TAIL units tall, 2 units narrower per step, outlined
-        T2 = T
+        # tail: 45° wedge — right edge straight, left edge one cell per row — so the outline is a
+        # continuous diagonal; the body's edge + shade rows open into it with no seam
+        base = T + 1
         if self.tail_side == "bottom":
-            tc = max(2 * T2 + 3, min(bw - 3, int(self.tail_at)))   # right edge of the wedge
-            for k in range(T2):
-                y = oy + bh + k
-                w = 2 * (T2 - k) + 1
+            tc = max(base + 3, min(bw - 3, int(self.tail_at)))   # column just right of the wedge
+            for row in (bh - 2, bh - 1):                         # open body shade + outline rows
+                for x in range(tc - base, tc):
+                    g[(ox + x, oy + row)] = "f"
+            for k in range(T):
+                y, w = oy + bh + k, base - k
                 for x in range(tc - w, tc):
                     g[(ox + x, y)] = "f"
                 g[(ox + tc - w - 1, y)] = "o"
                 g[(ox + tc, y)] = "o"
-            g[(ox + tc - 1, oy + bh + T2)] = "o"
-            g[(ox + tc, oy + bh + T2)] = "o"
-            w0 = 2 * T2 + 1
-            for x in range(tc - w0, tc):
-                g[(ox + x, oy + bh - 1)] = "f"    # open the body edge into the tail
-            g[(ox + tc - w0, oy + bh - 1)] = "s"
+            g[(ox + tc - 1, oy + bh + T)] = "o"
+            g[(ox + tc, oy + bh + T)] = "o"
         else:
-            tr = max(2 * T2 + 3, min(bh - 3, int(self.tail_at)))
-            for k in range(T2):
-                x = (ox - 1 - k) if self.tail_side == "left" else (ox + bw + k)
-                w = 2 * (T2 - k) + 1
+            tr = max(base + 3, min(bh - 3, int(self.tail_at)))
+            left = self.tail_side == "left"
+            for col in ((ox, ox + 1) if left else (ox + bw - 1, ox + bw - 2)):
+                for y in range(tr - base, tr):
+                    g[(col, oy + y)] = "f"
+            for k in range(T):
+                x, w = (ox - 1 - k) if left else (ox + bw + k), base - k
                 for y in range(tr - w, tr):
-                    g[(x, y)] = "f"
-                g[(x, tr - w - 1)] = "o"
-                g[(x, tr)] = "o"
-            xt = (ox - 1 - T2) if self.tail_side == "left" else (ox + bw + T2)
-            g[(xt, tr - 1)] = "o"
-            g[(xt, tr)] = "o"
-            xe = ox if self.tail_side == "left" else ox + bw - 1
-            w0 = 2 * T2 + 1
-            for y in range(tr - w0, tr):
-                g[(xe, y)] = "f"
-            g[(xe, tr - w0)] = "s"
+                    g[(x, oy + y)] = "f"
+                g[(x, oy + tr - w - 1)] = "o"
+                g[(x, oy + tr)] = "o"
+            xt = (ox - 1 - T) if left else (ox + bw + T)
+            g[(xt, oy + tr - 1)] = "o"
+            g[(xt, oy + tr)] = "o"
         return g, ox, oy
 
     def on_draw(self, _w, cr) -> bool:
@@ -254,6 +251,7 @@ class Sprite(Gtk.Window):
         self._suppress_save = 0.0
         self._press: tuple[int, int, int] | None = None  # x_root, y_root, time
         self._dragging = False
+        self._grab = (0, 0)
 
         self.set_title("forge")
         self.set_decorated(False)
@@ -273,7 +271,8 @@ class Sprite(Gtk.Window):
         self.area.connect("draw", self.on_draw)
         self.add(self.area)
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
-                        | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.SCROLL_MASK)
+                        | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.BUTTON_MOTION_MASK
+                        | Gdk.EventMask.SCROLL_MASK)
         self.connect("scroll-event", self.on_scroll)
         self.connect("button-press-event", self.on_press)
         self.connect("button-release-event", self.on_release)
@@ -340,38 +339,48 @@ class Sprite(Gtk.Window):
 
     def on_press(self, _w, ev) -> bool:
         if ev.button == 1:
+            wx, wy = self.get_position()
             self._press = (int(ev.x_root), int(ev.y_root), ev.time)
+            self._grab = (int(ev.x_root) - wx, int(ev.y_root) - wy)  # pointer offset in window
             self._dragging = False
         elif ev.button == 3:
             self.open_menu(ev)
         return True
 
     def on_motion(self, _w, ev) -> bool:
-        if self._press and not self._dragging and ev.state & Gdk.ModifierType.BUTTON1_MASK:
-            x0, y0, t0 = self._press
-            if abs(ev.x_root - x0) > self.DRAG_PX or abs(ev.y_root - y0) > self.DRAG_PX:
+        # manual drag: Mutter won't WM-move a DOCK window (begin_move_drag is ignored), but a
+        # dock may position itself, so we follow the pointer with move()
+        if self._press and ev.state & Gdk.ModifierType.BUTTON1_MASK:
+            x0, y0, _ = self._press
+            if not self._dragging and (abs(ev.x_root - x0) > self.DRAG_PX
+                                       or abs(ev.y_root - y0) > self.DRAG_PX):
                 self._dragging = True
-                self.begin_move_drag(1, x0, y0, t0)
+                self.bubble.hide()
+            if self._dragging:
+                gx, gy = self._grab
+                self.move(int(ev.x_root) - gx, int(ev.y_root) - gy)
         return True
 
     def on_release(self, _w, ev) -> bool:
-        if ev.button == 1 and self._press and not self._dragging:
-            self.open_prompt()
-        self._press = None
-        return True
-
-    def on_configure(self, _w, ev) -> bool:
-        # persist a drag; ignore programmatic moves right after we placed ourselves
-        if time.time() > self._suppress_save:
-            x, y = self.get_position()
-            if (x, y) != (self.cfg.get("x"), self.cfg.get("y")):
+        if ev.button == 1 and self._press:
+            if self._dragging:
+                x, y = self.get_position()
                 self.cfg["x"], self.cfg["y"] = x, y
                 self.cfg.pop("corner", None)
                 save_avatar_cfg({"x": x, "y": y, "corner": None})
                 self._cfg_mtime = AVATAR_CFG.stat().st_mtime
-                if self.bubble.get_visible():
-                    sw, sh = self.sprite_size()
-                    self.bubble.show_at(self.text, (x, y + self.bubble_h, sw, sh))
+                self._suppress_save = time.time() + 1.0
+            else:
+                self.open_prompt()
+        self._press = None
+        self._dragging = False
+        return True
+
+    def on_configure(self, _w, ev) -> bool:
+        if self.bubble.get_visible() and not self._dragging:
+            x, y = self.get_position()
+            sw, sh = self.sprite_size()
+            self.bubble.show_at(self.text, (x, y + self.bubble_h, sw, sh))
         return False
 
     # -- menu ----------------------------------------------------------------------------------
