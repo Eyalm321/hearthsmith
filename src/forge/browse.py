@@ -67,10 +67,15 @@ def _fill_value(cfg: config.Config, goal: str, field_desc: str) -> str:
     return out.strip().strip('"').splitlines()[0] if out else goal
 
 
+SITE_RE = re.compile(r"\b(?:go to|open|navigate to|visit|goto)\s+([a-z0-9][a-z0-9-]{1,40})\b", re.IGNORECASE)
+
+
 def _goal_url(goal: str) -> str | None:
     if m := URL_RE.search(goal):
         u = m.group(1)
         return u if u.startswith("http") else "https://" + u
+    if m := SITE_RE.search(goal):          # "go to google" → https://www.google.com
+        return f"https://www.{m.group(1).lower()}.com"
     return None
 
 
