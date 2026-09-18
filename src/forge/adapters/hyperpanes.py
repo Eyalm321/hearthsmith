@@ -87,7 +87,9 @@ class Hyperpanes:
         return True
 
     def _client(self) -> httpx.Client:
-        return httpx.Client(base_url=self._base, timeout=5.0,
+        if self._base is None:
+            self._load()          # every entry point used to have to call alive() first
+        return httpx.Client(base_url=self._base or "http://127.0.0.1:0", timeout=8.0,
                             headers={"Authorization": f"Bearer {self._token}"})
 
     def alive(self) -> bool:
@@ -124,6 +126,18 @@ class Hyperpanes:
                         snap.panes.append(pane)
         return snap
 
+    def screen(self, pane_id: str, tail: int | None = None) -> str:
+        """Rendered screen of one pane, busy or not — `snapshot` only fetches busy panes, which
+        made a freshly spawned (idle) agent look like an empty window."""
+        with self._client() as c:
+            r = c.get(f"/panes/{pane_id}/output",
+                      params={"mode": "screen", "tail": tail or self.tail_lines})
+            if r.status_code != 200:
+                return ""
+            body = r.json() if r.headers.get("content-type", "").startswith("application/json") \
+                else {"output": r.text}
+            return body.get("output") or body.get("text") or ""
+
     # -- speak -----------------------------------------------------------------------------
 
     def message(self, pane_id: str, text: str) -> bool:
@@ -140,6 +154,84 @@ class Hyperpanes:
         with self._client() as c:
             r = c.post(f"/panes/{pane_id}/input", json={"data": text, "submit": True})
             return r.status_code < 300
+
+    # -- spawn -----------------------------------------------------------------------------
+
+    def new_pane(self, command: str | None = None, args: list[str] | None = None,
+                 cwd: str | None = None, label: str | None = None,
+                 window_id: int = 0) -> str | None:
+        """Open a pane and return its id. `command` is what runs in it (e.g. "claude"); the spec
+        fields must be nested under "pane" or the API rejects the call."""
+        spec: dict = {}
+        for k, v in (("command", command), ("args", args), ("cwd", cwd), ("label", label)):
+            if v:
+                spec[k] = v
+        with self._client() as c:
+            r = c.post("/command", json={"type": "newPane", "windowId": window_id, "pane": spec})
+            if r.status_code >= 300:
+                return None
+            body = r.json()
+            # the API answers {"ok": true, "result": "<uuid>"} and /state reports that id
+            # verbatim — older panes carry a "pane-" prefix, freshly created ones do not
+            res = body.get("result")
+            if isinstance(res, dict):
+                res = res.get("paneId") or res.get("id")
+            return res if isinstance(res, str) else None
+
+    def close_pane(self, pane_id: str) -> bool:
+        with self._client() as c:
+            r = c.post("/command", json={"type": "closePane", "paneId": pane_id})
+            return r.status_code < 300
+
+    TRUST = ("i trust this folder", "trust the files in this folder", "trust this workspace",
+             "do you trust the files", "no, exit")
+    # Claude's own input hint — NOT hyperpanes' status bar, which draws "⏵⏵ auto mode" in every
+    # pane including one sitting on a modal dialog.
+    PROMPT = ("? for shortcuts", "│ >", "esc to interrupt")
+
+    def answer_trust(self, pane_id: str, timeout: float = 25.0) -> bool:
+        """Claude asks whether it trusts the folder before it will take any input. Anything typed
+        at that dialog is swallowed (and can end the session), so it has to be answered first.
+        True = a prompt was seen and accepted."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            screen = self.screen(pane_id, tail=40).lower()
+            if any(t in screen for t in self.TRUST):
+                # the dialog opens on "No, exit" — confirming blind would end the session
+                with self._client() as c:
+                    c.post(f"/panes/{pane_id}/input", json={"keys": ["down"]})
+                    time.sleep(0.3)
+                    c.post(f"/panes/{pane_id}/input", json={"keys": ["enter"]})
+                time.sleep(2.0)
+                return True
+            if any(p in screen for p in self.PROMPT):
+                return False          # already at the input box, nothing to trust
+            time.sleep(1.0)
+        return False
+
+    def wait_ready(self, pane_id: str, needle: str = "", timeout: float = 60.0) -> bool:
+        """Wait for a freshly spawned agent to reach its prompt: idle, with something on screen.
+        Typing into it before that goes into the void."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            time.sleep(1.0)
+            snap = self.snapshot(with_screens=True)
+            if not snap:
+                return False
+            pane = next((p for p in snap.panes if p.id == pane_id), None)
+            if pane is None:
+                continue
+            screen = self.screen(pane_id)
+            # an agent CLI paints its prompt and then sits there; "idle with something drawn" is
+            # the general signal, and these markers are what Claude's prompt looks like
+            low = screen.lower()
+            if any(t in low for t in self.TRUST):
+                return False          # caller must answer the trust dialog first
+            ready = bool(screen.strip()) and (pane.activity != "busy"
+                                              or any(m in screen for m in self.PROMPT))
+            if ready and (not needle or needle.lower() in screen.lower()):
+                return True
+        return False
 
     # -- delegate --------------------------------------------------------------------------
 

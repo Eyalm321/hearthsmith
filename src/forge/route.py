@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import httpx
 from typesafe_sdk import Choice, Noul
@@ -32,7 +35,9 @@ INTENTS = {
     "add": "a new task or reminder to remember for later (not to be done right now by an agent)",
     "browse": "something to do in a web browser: open a site, search, click through, read a page",
     "desktop": "something to do in another app on screen: files, settings, a window, a menu, a dialog",
-    "pane": "work that should go to an AI agent already running in one of the open terminal panes",
+    "spawn": "start a NEW pane/agent for this work — the user asked to open one, or the work "
+             "deserves its own agent rather than interrupting one that is already busy",
+    "pane": "work that should go to an AI agent ALREADY running in one of the open terminal panes",
     "delegate": "mechanical work to hand to a fresh background worker agent now",
     "done": "the user is saying an existing task is finished",
     "snooze": "the user wants to be left alone about an existing task for a while",
@@ -68,6 +73,42 @@ def _say(cfg: config.ComposeCfg, situation: str, instruction: str) -> str | None
             {"role": "user", "content": f"{situation}\n\n{instruction}"}]
     out = _ollama(cfg, msgs) or _openrouter(cfg, msgs)
     return _trim(out) if out else None
+
+
+# "open a new pane with claude and ask it to research X" — the pane is the plumbing, X is the job.
+BRIEF_RE = re.compile(r"\b(?:and\s+)?(?:ask|tell|get)\s+it\s+to\s+(.+)$", re.IGNORECASE | re.DOTALL)
+PLUMBING = re.compile(r"^\s*(?:on\s+hyperpanes[,\s]*)?(?:please\s+)?(?:open|start|spawn|make|create)\s+"
+                      r"(?:a\s+)?new\s+(?:pane|agent|terminal|window)\s*(?:with\s+\w+)?\s*(?:and\s+)?",
+                      re.IGNORECASE)
+
+
+def _brief(text: str) -> str:
+    """Strip the 'open a pane and ask it to' scaffolding; what's left is the actual assignment."""
+    if m := BRIEF_RE.search(text):
+        return m.group(1).strip(" .")
+    return PLUMBING.sub("", text).strip(" .") or text
+
+
+def _workdir(text: str, snap) -> str:
+    """Which folder the new agent starts in — Claude inherits it as its workspace, so it decides
+    what the agent can see. Matched against the assignment only: "on hyperpanes open a pane…"
+    names the app that hosts the pane, not the folder the work belongs to."""
+    low = _brief(text).lower()
+    for p in (snap.projects if snap else []):
+        if p["name"].lower() in low:
+            return p["path"]
+    if m := re.search(r"(~?/[\w.-]+(?:/[\w.-]+)+)", text):      # an explicit path wins
+        p = Path(m.group(1)).expanduser()
+        if p.is_dir():
+            return str(p)
+    # Deliberately NOT whatever pane happens to be in front: a research errand inherited
+    # someone else's repo that way, which is both wrong and a wider grant than intended.
+    return str(Path.home())
+
+
+def _label(brief: str) -> str:
+    words = [w for w in re.split(r"\W+", brief) if len(w) > 3][:4]
+    return " ".join(words)[:40] or "forge task"
 
 
 def route(text: str, cfg: config.Config | None = None) -> Reply:
@@ -134,6 +175,28 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         line = _say(cfg.compose, f"The user just asked you to remember: '{text}' (due: {DUE[due_i]}).",
                     "Confirm in one short line, in character.") or f"Noted: {text} ({DUE[due_i]})."
         return Reply(intent, line, t.id, raw=raw)
+
+    if intent == "spawn":
+        brief = _brief(text)
+        # absolute path: the GUI app's PATH is the session's, not the shell's, so a bare
+        # "claude" silently falls back to a plain shell pane
+        exe = shutil.which("claude") or str(Path.home() / ".local/bin/claude")
+        cwd = _workdir(text, snap)
+        pane_id = hp.new_pane(command=exe, cwd=cwd, label=_label(brief))
+        if not pane_id:
+            intent = "pane"          # couldn't open one; fall through to an existing pane
+        else:
+            t = store.add(brief)
+            store.set_state(t.id, "delegated")
+            hp.answer_trust(pane_id)          # nothing is accepted until the folder is trusted
+            ready = hp.wait_ready(pane_id)
+            if ready and hp.type_into(pane_id, brief, user_originated=True):
+                where = Path(cwd).name or cwd
+                return Reply(intent, f"Opened a pane in {where} and set it on it: {_label(brief)}.",
+                             t.id, pane_id, raw)
+            return Reply(intent, "Opened a pane — it's still starting, so I left the brief for "
+                         "you to send." if not ready else "Opened a pane but couldn't type into it.",
+                         t.id, pane_id, raw)
 
     if intent == "pane" and "pane" in a and snap:
         pane_id = a["pane"]["choice"]
