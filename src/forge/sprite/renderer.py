@@ -277,6 +277,8 @@ class Sprite(Gtk.Window):
 
         self.bubble = Bubble()
         self._alive_at = 0.0
+        self._drawn_at = time.time()
+        self._remapped_at = 0.0
         self.area = Gtk.DrawingArea()
         self.area.connect("draw", self.on_draw)
         self.add(self.area)
@@ -640,17 +642,36 @@ class Sprite(Gtk.Window):
             # the compositor placed a DOCK window where it liked; put him back
             self._suppress_save = time.time() + 1.0
             self.move(*want)
-        if time.time() - self._alive_at > 2:
+        self.area.queue_draw()
+        # The clock can tick while nothing reaches the screen: the frame clock waits on a
+        # compositor that has stopped answering (seen after he was shoved around the monitors)
+        # and every queue_draw from then on is silently dropped — he stands frozen mid-pose
+        # for hours with sprite.alive fresh. Alive means drawn, not ticking. Past 5s without a
+        # paint, remap the window once; if that doesn't wake it, exit non-zero and let systemd
+        # bring him back (Restart=on-failure).
+        stalled = time.time() - self._drawn_at
+        if stalled > 5 and self.get_mapped():
+            if not self._remapped_at:
+                log.warning("no paint for %.0fs — remapping window", stalled)
+                self._remapped_at = time.time()
+                self.hide()
+                self.show_all()
+            elif time.time() - self._remapped_at > 5:
+                log.error("still no paint after remap — exiting for a restart")
+                logging.shutdown()
+                os._exit(3)
+        if stalled < 5 and time.time() - self._alive_at > 2:
             self._alive_at = time.time()
             try:
                 ALIVE_FILE.touch()
             except OSError:
                 pass
-        self.area.queue_draw()
 
     # -- drawing -------------------------------------------------------------------------------
 
     def on_draw(self, _w, cr) -> bool:
+        self._drawn_at = time.time()
+        self._remapped_at = 0.0
         cr.set_source_rgba(0, 0, 0, 0)
         cr.set_operator(cairo.OPERATOR_SOURCE)
         cr.paint()
