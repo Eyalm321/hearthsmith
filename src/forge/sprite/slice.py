@@ -26,7 +26,7 @@ def chroma_to_alpha(im: Image.Image, hexcol: str, tol: int = 60) -> Image.Image:
     px = im.load()
     for y in range(im.height):
         for x in range(im.width):
-            r, g, b, a = px[x, y]
+            r, g, b, _a = px[x, y]
             if abs(r - r0) + abs(g - g0) + abs(b - b0) < tol:
                 px[x, y] = (0, 0, 0, 0)
     return im

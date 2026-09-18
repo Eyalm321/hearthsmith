@@ -24,16 +24,18 @@ import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
+gi.require_version("PangoCairo", "1.0")
 import cairo
 import yaml
-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango, PangoCairo
 
 from forge.config import STATE_DIR
 from forge.sprite import pack as packmod
 from forge.sprite import procedural
 from forge.sprite.procedural import AVATAR_CFG
 
-BUBBLE_W = 220
+BUBBLE_W = 300
+ALIVE_FILE = STATE_DIR / "sprite.alive"
 
 
 def _rgb(hexs: str) -> tuple[float, float, float]:
@@ -56,6 +58,119 @@ def save_avatar_cfg(patch: dict) -> None:
             cfg[k] = v
     AVATAR_CFG.parent.mkdir(parents=True, exist_ok=True)
     AVATAR_CFG.write_text(yaml.safe_dump(cfg, sort_keys=True))
+
+
+class Bubble(Gtk.Window):
+    """Speech balloon: its own transparent always-on-top popup, tail aimed at the sprite's head,
+    placed above/left/right of him depending on screen room. Click-through."""
+
+    PAD, RADIUS, TAIL = 12, 12, 14
+
+    def __init__(self):
+        super().__init__(type=Gtk.WindowType.POPUP)
+        self.set_app_paintable(True)
+        self.set_keep_above(True)
+        self.set_accept_focus(False)
+        self.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
+        screen = self.get_screen()
+        if (vis := screen.get_rgba_visual()) and screen.is_composited():
+            self.set_visual(vis)
+        self.area = Gtk.DrawingArea()
+        self.area.connect("draw", self.on_draw)
+        self.add(self.area)
+        self.text, self.tail_side, self.tail_at = "", "bottom", 0.5
+        self.connect("realize", lambda *_: self.get_window().input_shape_combine_region(
+            cairo.Region(), 0, 0))
+
+    def layout(self, cr, width):
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription("Sans 11"))
+        lay.set_width(width * Pango.SCALE)
+        lay.set_wrap(Pango.WrapMode.WORD_CHAR)
+        lay.set_text(self.text, -1)
+        return lay
+
+    def show_at(self, text: str, anchor: tuple[int, int, int, int]) -> None:
+        """anchor = sprite body rect (x, y, w, h) in root coords."""
+        self.text = text
+        sx, sy, sw, sh = anchor
+        mon = self.get_screen().get_display().get_primary_monitor().get_workarea()
+        # measure
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
+        cr = cairo.Context(surf)
+        lay = self.layout(cr, BUBBLE_W - 2 * self.PAD)
+        _, ext = lay.get_pixel_extents()
+        bw, bh = min(BUBBLE_W, ext.width + 2 * self.PAD), ext.height + 2 * self.PAD
+        # above him if there's room, else beside him on the side with more space
+        if sy - bh - self.TAIL - 8 >= mon.y:
+            self.tail_side = "bottom"
+            x = sx + sw // 2 - bw // 2
+            y = sy - bh - self.TAIL - 4
+            x = max(mon.x + 4, min(x, mon.x + mon.width - bw - 4))
+            self.tail_at = (sx + sw // 2 - x) / bw
+            self.resize(bw, bh + self.TAIL)
+        else:
+            right_room = mon.x + mon.width - (sx + sw)
+            self.tail_side = "left" if right_room >= bw + self.TAIL + 8 else "right"
+            x = sx + sw + self.TAIL + 4 if self.tail_side == "left" else sx - bw - self.TAIL - 4
+            y = max(mon.y + 4, min(sy + sh // 4 - bh // 2, mon.y + mon.height - bh - 4))
+            self.tail_at = (sy + sh // 3 - y) / bh
+            self.resize(bw + self.TAIL, bh)
+        self.move(int(x), int(y))
+        self.show_all()
+        self.area.queue_draw()
+
+    def on_draw(self, _w, cr) -> bool:
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        W, H = self.get_size()
+        t, r = self.TAIL, self.RADIUS
+        # body rect depends on tail side
+        bx, by, bw, bh = 0, 0, W, H
+        if self.tail_side == "bottom":
+            bh -= t
+        elif self.tail_side == "left":
+            bx, bw = t, W - t
+        else:
+            bw = W - t
+        self._rounded(cr, bx, by, bw, bh, r)
+        # tail
+        if self.tail_side == "bottom":
+            tx = bx + max(r + 6, min(bw - r - 6, self.tail_at * bw))
+            cr.move_to(tx - 9, by + bh - 1); cr.line_to(tx + 9, by + bh - 1); cr.line_to(tx, H)
+        elif self.tail_side == "left":
+            ty = by + max(r + 6, min(bh - r - 6, self.tail_at * bh))
+            cr.move_to(bx + 1, ty - 9); cr.line_to(bx + 1, ty + 9); cr.line_to(0, ty)
+        else:
+            ty = by + max(r + 6, min(bh - r - 6, self.tail_at * bh))
+            cr.move_to(bw - 1, ty - 9); cr.line_to(bw - 1, ty + 9); cr.line_to(W, ty)
+        cr.close_path()
+        cr.set_source_rgba(0.08, 0.08, 0.09, 0.96)
+        cr.fill_preserve()
+        cr.set_source_rgb(1, 0.6, 0.18)
+        cr.set_line_width(2)
+        cr.stroke()
+        # body again on top to hide the tail's inner stroke
+        self._rounded(cr, bx, by, bw, bh, r)
+        cr.set_source_rgba(0.08, 0.08, 0.09, 1)
+        cr.fill_preserve()
+        cr.set_source_rgb(1, 0.6, 0.18)
+        cr.stroke()
+        cr.set_source_rgb(0.95, 0.95, 0.95)
+        cr.move_to(bx + self.PAD, by + self.PAD)
+        PangoCairo.show_layout(cr, self.layout(cr, bw - 2 * self.PAD))
+        return True
+
+    @staticmethod
+    def _rounded(cr, x, y, w, h, r) -> None:
+        cr.new_sub_path()
+        cr.arc(x + w - r, y + r, r, -1.5708, 0)
+        cr.arc(x + w - r, y + h - r, r, 0, 1.5708)
+        cr.arc(x + r, y + h - r, r, 1.5708, 3.1416)
+        cr.arc(x + r, y + r, r, 3.1416, 4.7124)
+        cr.close_path()
 
 
 class Sprite(Gtk.Window):
@@ -84,6 +199,8 @@ class Sprite(Gtk.Window):
         if (vis := screen.get_rgba_visual()) and screen.is_composited():
             self.set_visual(vis)
 
+        self.bubble = Bubble()
+        self._alive_at = 0.0
         self.area = Gtk.DrawingArea()
         self.area.connect("draw", self.on_draw)
         self.add(self.area)
@@ -121,8 +238,8 @@ class Sprite(Gtk.Window):
                                                 **self.cfg.get("palette", {})}.items()}
         self._pix.clear()
         sw, sh = self.sprite_size()
-        self.bubble_h = 36
-        w, h = sw + BUBBLE_W, sh + self.bubble_h
+        self.bubble_h = 0
+        w, h = sw, sh
         self.set_size_request(w, h)
         self.resize(w, h)
         self._place(w, h)
@@ -184,6 +301,9 @@ class Sprite(Gtk.Window):
                 self.cfg.pop("corner", None)
                 save_avatar_cfg({"x": x, "y": y, "corner": None})
                 self._cfg_mtime = AVATAR_CFG.stat().st_mtime
+                if self.bubble.get_visible():
+                    sw, sh = self.sprite_size()
+                    self.bubble.show_at(self.text, (x, y + self.bubble_h, sw, sh))
         return False
 
     # -- menu ----------------------------------------------------------------------------------
@@ -320,7 +440,7 @@ class Sprite(Gtk.Window):
         threading.Thread(target=run, daemon=True).start()
 
     def _show_reply(self, r: dict) -> bool:
-        self.text, self.text_until = f"[{r['intent']}] {r['text']}", time.time() + 45
+        self.text, self.text_until = r["text"], time.time() + 60
         self.state, self.frame = ("alert" if r["intent"] in ("nag",) else "idle"), 0
         return False
 
@@ -345,6 +465,8 @@ class Sprite(Gtk.Window):
                     self.state, self.frame = new, 0
                 if d.get("text") and d.get("at", 0) > time.time() - 600:
                     self.text, self.text_until = d["text"], time.time() + 90
+                elif new in ("forge", "alert"):
+                    self.text_until = time.time() + 20  # animation without a line: short burst
         except (OSError, ValueError):
             pass
         fps = (self.pack.fps if self.pack else procedural.FPS).get(self.state, 1)
@@ -352,6 +474,23 @@ class Sprite(Gtk.Window):
             self.frame += 1
         if self.text and time.time() > self.text_until:
             self.text = ""
+            if self.state in ("forge", "alert"):
+                self.state, self.frame = "idle", 0  # said his piece; back to the bellows
+        elif not self.text and self.state in ("forge", "alert") and time.time() > self.text_until:
+            self.state, self.frame = "idle", 0
+        if self.text:
+            if self.bubble.text != self.text or not self.bubble.get_visible():
+                x, y = self.get_position()
+                sw, sh = self.sprite_size()
+                self.bubble.show_at(self.text, (x, y + self.bubble_h, sw, sh))
+        elif self.bubble.get_visible():
+            self.bubble.hide()
+        if time.time() - self._alive_at > 2:
+            self._alive_at = time.time()
+            try:
+                ALIVE_FILE.touch()
+            except OSError:
+                pass
         self.area.queue_draw()
         return True
 
@@ -376,8 +515,6 @@ class Sprite(Gtk.Window):
                         cr.set_source_rgb(*self.palette[key])
                         cr.rectangle(x * s, oy + y * s, s + 0.5, s + 0.5)
                         cr.fill()
-        if self.text:
-            self._bubble(cr, sw + 8, oy + 8, BUBBLE_W - 12, self.text)
         return True
 
     def _blit(self, cr, path: Path, x: int, y: int, size: int) -> None:
@@ -391,34 +528,6 @@ class Sprite(Gtk.Window):
         Gdk.cairo_set_source_pixbuf(cr, pb, x, y)
         cr.get_source().set_filter(cairo.FILTER_FAST)
         cr.paint()
-
-    def _label(self, cr, x, y, text) -> None:
-        cr.select_font_face("monospace")
-        cr.set_font_size(10)
-        cr.set_source_rgba(0.08, 0.08, 0.08, 0.85)
-        ext = cr.text_extents(text)
-        cr.rectangle(x - 3, y - ext.height - 3, ext.width + 6, ext.height + 6)
-        cr.fill()
-        cr.set_source_rgb(1, 0.6, 0.18)
-        cr.move_to(x, y)
-        cr.show_text(text)
-
-    def _bubble(self, cr, x, y, w, text) -> None:
-        import textwrap
-        lines = textwrap.wrap(text, 30)[:5]
-        h = 14 * len(lines) + 12
-        cr.set_source_rgba(0.08, 0.08, 0.08, 0.92)
-        cr.rectangle(x, y, w, h)
-        cr.fill()
-        cr.set_source_rgb(1, 0.6, 0.18)
-        cr.rectangle(x, y, w, 2)
-        cr.fill()
-        cr.set_source_rgb(0.95, 0.95, 0.95)
-        cr.select_font_face("monospace")
-        cr.set_font_size(11)
-        for i, ln in enumerate(lines):
-            cr.move_to(x + 6, y + 16 + 14 * i)
-            cr.show_text(ln)
 
 
 def main() -> None:

@@ -77,7 +77,7 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
         if not tasks:
             text = "Ledger's clean. Nothing to hammer on."
             sprite.write("idle", text, "ignorable")
-            if not dry:
+            if not dry and not sprite.alive():
                 NotifySink().send(text, "ignorable", None)
             return {"forced": True, "text": text}
         d.task_id = tasks[0].id
@@ -97,7 +97,7 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
             text = f"Handing '{task.title}' to a worker pane."
             sprite.write("forge", text, d.urgency)
             store.log_nag(task.id, "delegate", d.urgency, text, d.as_json())
-            if not dry:
+            if not dry and not sprite.alive():
                 NotifySink().send(text, d.urgency, task)
             return {"delegated": task.id, "job": job}
 
@@ -108,14 +108,17 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
         return {"dry_run": result}
 
     delivered = []
-    sinks = {"notify": NotifySink(), "hyperpanes": HyperpanesSink(hp)}
-    order = [d.channel] + [c for c in cfg.nag.channels if c != d.channel]
-    for name in order:
-        s = sinks.get(name)
-        if s and s.send(text, d.urgency, task):
-            delivered.append(name)
-            break
-    sprite.write("alert" if d.urgency == "now" else "forge", text, d.urgency)
+    sinks = {"sprite": sprite, "notify": NotifySink(), "hyperpanes": HyperpanesSink(hp)}
+    # he speaks if he's on screen; the pane agent gets it too when Jev picked that channel;
+    # notify-send is the fallback when nobody else could deliver
+    if sprite.send(text, d.urgency, task):
+        delivered.append("sprite")
+    if d.channel == "hyperpanes" and sinks["hyperpanes"].send(text, d.urgency, task):
+        delivered.append("hyperpanes")
+    if not delivered and NotifySink().send(text, d.urgency, task):
+        delivered.append("notify")
+    if not delivered:
+        sprite.write("alert" if d.urgency == "now" else "forge", text, d.urgency)
     store.mark_nagged(task.id)
     store.log_nag(task.id, ",".join(delivered) or "none", d.urgency, text, d.as_json())
     result["delivered"] = delivered

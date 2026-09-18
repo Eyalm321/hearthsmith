@@ -52,12 +52,27 @@ class HyperpanesSink:
 
 
 class SpriteSink:
-    """Not a delivery channel — writes the avatar state file the renderer polls."""
+    """The avatar. Writes the state file the renderer polls; counts as delivered only when the
+    renderer is alive (it touches sprite.alive every 2s), so notify-send can take over when he's
+    hidden."""
 
     name = "sprite"
 
     def __init__(self, path: Path):
         self.path = path
+        self.alive_file = path.parent / "sprite.alive"
+
+    def alive(self) -> bool:
+        try:
+            return time.time() - self.alive_file.stat().st_mtime < 6
+        except OSError:
+            return False
+
+    def send(self, text: str, urgency: str, task: Task | None) -> bool:
+        if not self.alive():
+            return False
+        self.write("alert" if urgency == "now" else "forge", text, urgency)
+        return True
 
     def write(self, state: str, text: str = "", urgency: str = "ignorable") -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
