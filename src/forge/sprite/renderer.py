@@ -261,12 +261,12 @@ class Sprite(Gtk.Window):
         css = Gtk.CssProvider()
         css.load_from_data(b"""
             #forge-prompt { background: rgba(20,20,22,0.96); border: 2px solid #ff9a2e;
-                            border-radius: 10px; padding: 6px 10px; }
+                            border-radius: 10px; padding: 6px 12px; }
             #forge-prompt entry { background: transparent; border: none; box-shadow: none;
                                   color: #f2f2f2; font-family: monospace; font-size: 15px;
                                   caret-color: #ff9a2e; }
-            #forge-prompt label { color: #ff9a2e; font-family: monospace; font-size: 13px;
-                                  margin-right: 8px; }
+            #forge-prompt label { color: #ff9a2e; font-size: 26px; margin-right: 12px;
+                                  margin-left: 2px; }
         """)
         Gtk.StyleContext.add_provider_for_screen(w.get_screen(), css,
                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
