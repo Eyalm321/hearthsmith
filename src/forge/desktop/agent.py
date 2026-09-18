@@ -25,7 +25,7 @@ import os
 import re
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import httpx
 from typesafe_sdk import Choice, Noul
@@ -183,6 +183,24 @@ def _navigate_url(goal: str, cfg: config.Config | None = None, in_browser: bool 
     return None
 
 
+LOOKUP = re.compile(r"\b(look (?:for|up)|show me|find|search|what(?:'s| is)|how much|price of)\b",
+                    re.IGNORECASE)
+
+
+def _answered_by(goal: str, title: str) -> bool:
+    """A 'look for flights ORF to NYC' errand is done when the page is showing that — the
+    decider otherwise keeps hunting for one more click on a page that already answers it."""
+    if not LOOKUP.search(goal):
+        return False
+    words = {w for w in re.findall(r"[a-z0-9]{3,}", STOPWORDS.sub("", goal).lower())
+             if w not in ("for", "the", "and", "from")}
+    if not words:
+        return False
+    low = title.lower()
+    hit = sum(1 for w in words if w in low)
+    return hit >= max(2, len(words) // 2)
+
+
 def _launch_target(goal: str) -> str | None:
     """Which executable the goal implies: a named app, else a browser if it names a site."""
     low = goal.lower()
@@ -262,6 +280,12 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
             # No accessible window is not the end: the app he needs may simply not be open, or
             # what's on screen may not expose accessibility. Let Jev decide to launch/focus.
             els = atspi.elements(win, limit=70) if win is not None else []
+            if win is not None:
+                # the tab you're already on is not a destination — clicking it does nothing and
+                # looks like progress to a decider comparing titles
+                els = [e for e in els if not (e.role == "page tab" and e.name
+                                              and win.title.startswith(e.name))]
+                els = [replace(e, i=i) for i, e in enumerate(els)]
             res.window = f"{win.app}: {win.title}" if win else "(nothing accessible)"
             opaque = [f"{w['app'] or w['wm_class']}: {w['title']}" for w in on_screen
                       if not any(x.title == w["title"] for x in wins)]
@@ -296,7 +320,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                 last = (op, a.get("key", {}).get("choice"))
 
             if op == "navigate":
-                u = _navigate_url(goal)
+                u = nav_url        # already resolved above, with the browser context
                 if not u:
                     res.note = "navigate chosen but no address or search in the goal"
                     return res
@@ -313,6 +337,10 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                         time.sleep(0.4)
                         w2 = next((x for x in atspi.windows() if x.app == (win.app if win else "")), None)
                         if w2 and w2.title != (win.title if win else ""):
+                            if _answered_by(goal, w2.title):
+                                res.steps.append(step)
+                                res.ok, res.window = True, f"{w2.app}: {w2.title}"
+                                return res
                             break
 
             elif op == "launch":
@@ -331,6 +359,10 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
 
             elif op == "focus" and "window" in a:
                 w = wins[int(a["window"]["choice"])]
+                if (op, w.title) == last:
+                    res.note = f"already focused {w.app}"
+                    return res
+                last = (op, w.title)
                 step = f"focus {w.app}: {w.title}"
                 if not dry:
                     if not (w.shell_id and atspi.activate_window(w.shell_id)):
