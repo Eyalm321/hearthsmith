@@ -70,6 +70,10 @@ Not built yet. The daemon writes `sprite.json` (`state ∈ idle | forge | alert 
 `urgency`); the renderer is a separate process. Plan: layered spritesheets + palette LUT so the
 blacksmith is customizable without new art.
 
+While either body works, the avatar narrates it — "clicking One way", "typing Where from? =
+'Zurich'" — so a task running in his Chrome is still visible on your desktop. Progress lines skip
+the typewriter and expire in seconds; a nag still types out and stays.
+
 ## Two bodies, one brain
 
 Jev decides; where the hands are depends on the job.

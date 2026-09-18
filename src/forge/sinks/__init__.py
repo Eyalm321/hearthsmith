@@ -74,7 +74,10 @@ class SpriteSink:
         self.write("alert" if urgency == "now" else "forge", text, urgency)
         return True
 
-    def write(self, state: str, text: str = "", urgency: str = "ignorable") -> None:
+    def write(self, state: str, text: str = "", urgency: str = "ignorable",
+              instant: bool = False) -> None:
+        """`instant` skips the typewriter: a nag is worth typing out, a running commentary that
+        changes every few hundred milliseconds is not."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps({"state": state, "text": text, "urgency": urgency,
-                                         "at": int(time.time())}))
+                                         "instant": instant, "at": int(time.time())}))

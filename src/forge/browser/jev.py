@@ -138,6 +138,10 @@ def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
 
     from jev_ultrafast import Agent
 
+    from forge.progress import Narrator
+    say = Narrator(cfg)
+    say.step(f"opening {start.split('//')[-1][:60]}", "forge")
+
     res = Result(False)
     # The Agent closes its tab on context exit, which runs before any of our own cleanup — so
     # the decision to keep it has to be made the moment success is seen, not afterwards.
@@ -157,6 +161,7 @@ def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
                     if p is not None and lat is not None:
                         line += f"  [p={p:.2f}, {lat:.0f}ms]"
                     res.steps.append(line[:140])
+                    say.step(line)
                 res.decide_ms = [h["latency_ms"] for h in state.get("history", [])
                                  if h.get("latency_ms") is not None]
                 page = state.get("page") or {}
@@ -167,10 +172,13 @@ def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
                     res.ok = status == "done"
                     _keep_tab[0] = res.ok      # leave the answer on screen; tidy up dead ends
                     res.note = "" if res.ok else status
+                    (say.done(f"Done — {res.title or 'have a look'}.") if res.ok
+                     else say.failed(f"Couldn't finish: {status}."))
                     break
                 if res.elapsed_ms > max_seconds * 1000:
                     res.note = "time limit"
                     break
     except Exception as e:  # noqa: BLE001 — a browser failure is a result, not a crash
         res.note = f"{type(e).__name__}: {e}"[:200]
+        say.failed(res.note)
     return res

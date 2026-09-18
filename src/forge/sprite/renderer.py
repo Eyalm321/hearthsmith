@@ -120,13 +120,16 @@ class Bubble(Gtk.Window):
 
     # -- placement -----------------------------------------------------------------------------
 
-    def show_at(self, text: str, anchor: tuple[int, int, int, int]) -> None:
+    def show_at(self, text: str, anchor: tuple[int, int, int, int], instant: bool = False) -> None:
         """anchor = sprite body rect (x, y, w, h) in root coords."""
         restart = text != self.text
         self.text = text
         if restart:
-            self.shown = 0
-            GLib.timeout_add(80, self._type)
+            if instant:
+                self.shown = len(text)
+            else:
+                self.shown = 0
+                GLib.timeout_add(80, self._type)
         U, P, T = self.U, self.PAD, self.TAIL
         sx, sy, sw, sh = anchor
         mon = self.get_screen().get_display().get_primary_monitor().get_workarea()
@@ -250,6 +253,7 @@ class Sprite(Gtk.Window):
         self.cli_scale, self.cli_corner = cli_scale, cli_corner
         self._pix: dict[tuple[Path, int], GdkPixbuf.Pixbuf] = {}
         self.state, self.frame, self.text, self.text_until = "idle", 0, "", 0.0
+        self.instant = False
         self._state_mtime = self._cfg_mtime = 0.0
         self._frame_at = 0.0
         self.cfg: dict = {}
@@ -571,7 +575,10 @@ class Sprite(Gtk.Window):
                 if new != self.state:
                     self.state, self.frame = new, 0
                 if d.get("text") and d.get("at", 0) > time.time() - 600:
-                    self.text, self.text_until = d["text"], time.time() + 90
+                    self.text = d["text"]
+                    # a running commentary expires fast; a nag is worth leaving up
+                    self.text_until = time.time() + (12 if d.get("instant") else 90)
+                    self.instant = bool(d.get("instant"))
                 elif new in ("forge", "alert"):
                     self.text_until = time.time() + 20  # animation without a line: short burst
         except (OSError, ValueError):
@@ -591,7 +598,8 @@ class Sprite(Gtk.Window):
             if self.bubble.text != self.text or not self.bubble.get_visible():
                 x, y = self.get_position()
                 sw, sh = self.sprite_size()
-                self.bubble.show_at(self.text, (x, y + self.bubble_h, sw, sh))
+                self.bubble.show_at(self.text, (x, y + self.bubble_h, sw, sh),
+                                    instant=self.instant)
         elif self.bubble.get_visible():
             self.bubble.hide()
         if time.time() - self._alive_at > 2:

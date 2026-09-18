@@ -304,6 +304,8 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
         hands: bool | None = None) -> Result:
     cfg = cfg or config.load()
     hands = cfg.desktop.hands if hands is None else hands
+    from forge.progress import Narrator
+    say = Narrator(cfg)
     res = Result(ok=False)
     ptr = kb = None
     if not dry and hands:
@@ -401,6 +403,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                         res.steps.append(f"looked: {why[:80]}")
                         continue
                 res.ok = True
+                say.done(f"Done — {res.window}." if res.window else "Done.")
                 return res
             if op == "stuck":
                 res.note = "stuck"
@@ -587,6 +590,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                         atspi.wait_settled(win, before, cap_ms=600)
 
             res.steps.append(step)
+            say.step(step)
         res.note = "step limit"
         return res
     finally:
