@@ -70,11 +70,21 @@ Not built yet. The daemon writes `sprite.json` (`state ∈ idle | forge | alert 
 `urgency`); the renderer is a separate process. Plan: layered spritesheets + palette LUT so the
 blacksmith is customizable without new art.
 
-## Browser
+## Computer use
 
-He drives **your** Firefox — a normal tab in the window you already have open, over WebDriver
-BiDi (`--remote-debugging-port 9222`, loopback only; `contrib/firefox.desktop` adds the flag to
-every launch). You watch, you can take over, your logins are already there. No headless
-browser, no separate profile. Loop: Firefox lists actionable elements → Jev picks action +
-target (typed decision, ~0.5s) → Firefox clicks/types. Without the port he can still open the
-URL for you.
+He works in **your** apps, on screen, with a real mouse and keyboard — no headless browser, no
+remote-debugging ports, no separate profile. Observe = AT-SPI2 accessibility tree (every GTK/Qt/
+Electron app and Firefox/Chromium page content), decide = Jev (typed Choice over the visible
+elements, ~0.5s), act = `/dev/uinput` absolute pointer + clipboard paste. If you grab the mouse
+mid-task he stops.
+
+Setup (once):
+- `gsettings set org.gnome.desktop.interface toolkit-accessibility true` (install.sh does it)
+- the `forge-windows` GNOME Shell extension (`contrib/gnome-extension`, install.sh copies it;
+  enable + log out/in once). Wayland hides window positions from clients; the extension exposes
+  frame rects over the session bus, read-only.
+- user in the `input` group (for `/dev/uinput`).
+
+`forge do "in Firefox, search for 'lw-pla filament'"` · `forge windows` shows what he sees.
+Custom-drawn surfaces (games, terminal grids) are invisible to AT-SPI — screenshot+vision is the
+fallback there, not built yet.

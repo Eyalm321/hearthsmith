@@ -33,9 +33,14 @@ systemctl --user enable --now forged.timer
 systemctl --user enable forge-sprite.service
 systemctl --user restart forge-sprite.service
 
-# Firefox launcher override: same Firefox, plus the remote-agent port so the smith can drive
-# tabs in YOUR browser (loopback only). Takes effect on the next Firefox start.
-cp "$HERE/firefox.desktop" ~/.local/share/applications/firefox.desktop
+# computer use: a11y bus on + window-geometry extension (Wayland hides frame rects otherwise)
+gsettings set org.gnome.desktop.interface toolkit-accessibility true
+mkdir -p ~/.local/share/gnome-shell/extensions
+rm -rf ~/.local/share/gnome-shell/extensions/forge-windows@forge
+cp -r "$HERE/gnome-extension/forge-windows@forge" ~/.local/share/gnome-shell/extensions/
+gnome-extensions enable forge-windows@forge 2>/dev/null || true
+id -nG | grep -qw input || echo "NOTE: add yourself to the input group for /dev/uinput: sudo usermod -aG input $USER (re-login)"
+echo "NOTE: new GNOME extensions load on next login (Wayland can't hot-reload the shell)"
 
 # app launcher + icon (+ autostart is the service's WantedBy=graphical-session.target)
 mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps

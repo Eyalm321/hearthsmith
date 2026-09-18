@@ -34,7 +34,9 @@ def main() -> None:
     sub.add_parser("nags")
     mu = sub.add_parser("mute", help="stop all nagging for a while"); mu.add_argument("minutes", type=int, nargs="?", default=60)
     sub.add_parser("unmute")
-    br = sub.add_parser("browse", help="Jev drives agent-browser toward a goal"); br.add_argument("goal", nargs="+"); br.add_argument("--json", action="store_true")
+    br = sub.add_parser("browse", help="Jev drives your Firefox toward a goal"); br.add_argument("goal", nargs="+"); br.add_argument("--json", action="store_true")
+    do = sub.add_parser("do", help="computer use: Jev drives any app (AT-SPI + uinput)"); do.add_argument("goal", nargs="+"); do.add_argument("--json", action="store_true"); do.add_argument("--dry", action="store_true")
+    sub.add_parser("windows", help="what the smith can see on screen")
     sy = sub.add_parser("say", help="tell the blacksmith something; Jev routes it"); sy.add_argument("text", nargs="+"); sy.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -61,6 +63,15 @@ def main() -> None:
         print(f"muted until {datetime.fromtimestamp(until):%H:%M}")
     elif args.cmd == "unmute":
         store.kv_set("muted_until", "0"); print("unmuted")
+    elif args.cmd == "do":
+        from forge.desktop.agent import run
+        r = run(" ".join(args.goal), cfg, dry=args.dry)
+        print(json.dumps(r.__dict__) if args.json else
+              ("done" if r.ok else f"not done ({r.note})") + f" @ {r.window}\n  " + "\n  ".join(r.steps))
+    elif args.cmd == "windows":
+        from forge.desktop import atspi
+        for w in atspi.windows():
+            print(f"{'*' if w.active else ' '} {w.app:<28} {w.title[:50]:<50} {w.x},{w.y} {w.w}x{w.h} {'shell' if w.shell_id else 'NO-GEOM'}")
     elif args.cmd == "browse":
         from forge.browse import browse
         r = browse(" ".join(args.goal), cfg)

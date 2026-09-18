@@ -31,6 +31,7 @@ from forge.store import Store
 INTENTS = {
     "add": "a new task or reminder to remember for later (not to be done right now by an agent)",
     "browse": "something to do in a web browser: open a site, search, click through, read a page",
+    "desktop": "something to do in another app on screen: files, settings, a window, a menu, a dialog",
     "pane": "work that should go to an AI agent already running in one of the open terminal panes",
     "delegate": "mechanical work to hand to a fresh background worker agent now",
     "done": "the user is saying an existing task is finished",
@@ -106,13 +107,12 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         return Reply("add", f"Noted '{text}'. (decider down: {type(e).__name__})", t.id)
 
     raw = {"answers": a}
-    if intent == "browse":
-        from forge.browse import browse
-        b = browse(text, cfg)
-        where = b.title or b.url
+    if intent in ("browse", "desktop"):
+        from forge.desktop.agent import run
+        b = run(text, cfg)
         if b.ok:
-            return Reply(intent, f"Done — {where}." if where else "Done.", raw={**raw, "steps": b.steps})
-        return Reply(intent, f"Couldn't finish ({b.note}). Got as far as {where or 'nowhere'}.",
+            return Reply(intent, f"Done — {b.window}." if b.window else "Done.", raw={**raw, "steps": b.steps})
+        return Reply(intent, f"Couldn't finish ({b.note}). Was in {b.window or 'nowhere'}.",
                      raw={**raw, "steps": b.steps})
     if intent == "add":
         due_i = int(a["due"]["choice"]); due = int(time.time() + DUE_SECS[due_i]) if DUE_SECS[due_i] else None
