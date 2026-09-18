@@ -4,5 +4,5 @@
   "description": "Exposes window frame rects + focus over DBus (org.forge.Windows) so the forge assistant can act on AT-SPI elements at real screen coordinates on Wayland. Read-only, session bus, no input injection.",
   "shell-version": ["48", "49", "50"],
   "url": "https://github.com/Eyalm321/forge",
-  "version": 2
+  "version": 3
 }

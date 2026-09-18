@@ -1,4 +1,5 @@
 import Gio from 'gi://Gio';
+import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -8,6 +9,14 @@ const IFACE = `
     <method name="List"><arg type="s" direction="out" name="json"/></method>
     <method name="Activate"><arg type="u" direction="in" name="id"/><arg type="b" direction="out" name="ok"/></method>
     <method name="Pointer"><arg type="s" direction="out" name="json"/></method>
+    <!-- Capture a region (w=0 → whole screen). Wayland gives clients no way to read the
+         screen, and the portal prompts every time; this is the same trust boundary as
+         the window list above. -->
+    <method name="Screenshot">
+      <arg type="i" direction="in" name="x"/><arg type="i" direction="in" name="y"/>
+      <arg type="i" direction="in" name="w"/><arg type="i" direction="in" name="h"/>
+      <arg type="s" direction="out" name="path"/>
+    </method>
   </interface>
 </node>`;
 
@@ -47,6 +56,26 @@ export default class ForgeWindows extends Extension {
         // user grabs the mouse mid-task so the assistant stops.
         const [x, y, mods] = global.get_pointer();
         return JSON.stringify({x, y, mods});
+    }
+
+    ScreenshotAsync([x, y, w, h], invocation) {
+        const path = GLib.build_filenamev([GLib.get_tmp_dir(), `forge-shot-${Date.now()}.png`]);
+        const stream = Gio.File.new_for_path(path).replace(
+            null, false, Gio.FileCreateFlags.REPLACE_DESTINATION, null);
+        const shooter = new Shell.Screenshot();
+        const reply = () => invocation.return_value(new GLib.Variant('(s)', [path]));
+        const fail = e => invocation.return_value(new GLib.Variant('(s)', [`ERROR: ${e}`]));
+        try {
+            if (w > 0 && h > 0) {
+                shooter.screenshot_area(x, y, w, h, stream, (o, res) => {
+                    try { shooter.screenshot_area_finish(res); reply(); } catch (e) { fail(e); }
+                });
+            } else {
+                shooter.screenshot(false, stream, (o, res) => {
+                    try { shooter.screenshot_finish(res); reply(); } catch (e) { fail(e); }
+                });
+            }
+        } catch (e) { fail(e); }
     }
 
     Activate(id) {

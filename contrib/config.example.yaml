@@ -14,6 +14,7 @@ hyperpanes:
   delegate_enabled: false      # turn on once a worker drains the queue
 desktop:
   hands: false                 # true = he may use the real mouse/keyboard (exclusive)
+  verify: true                 # one screenshot + vision check before reporting success
 nag:
   min_gap_minutes: 45
   quiet_hours: [23, 8]

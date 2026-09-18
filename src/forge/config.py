@@ -59,6 +59,9 @@ class DesktopCfg:
     # keyboard, so he can work while you work. True = he may drive the shared cursor.
     hands: bool = False
     max_steps: int = 12
+    # Before reporting success, take one look at the screen and ask the local vision model
+    # whether the goal is visibly done. Costs ~10s, once per task, only when it claims done.
+    verify: bool = True
 
 
 @dataclass

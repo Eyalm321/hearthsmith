@@ -62,6 +62,7 @@ class Result:
     steps: list[str] = field(default_factory=list)
     window: str = ""
     note: str = ""
+    seen: str = ""          # what the verifier saw, when it could look
 
 
 def _jev(cfg: config.DecideCfg, state, questions: dict) -> dict:
@@ -294,6 +295,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
     visited: list[str] = []
     filled: dict[str, str] = {}
     commits = 0
+    verified = 0
     try:
         for _ in range(max_steps):
             pos = _pointer_pos() if (expected_ptr and not dry) else None
@@ -361,6 +363,17 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                                            cap_ms=1500)
                     res.steps.append(step)
                     continue
+                if cfg.desktop.verify and not dry and verified < 2:
+                    from forge.desktop import vision
+                    rect = (win.x, win.y, win.w, win.h) if win else None
+                    ok_seen, why = vision.verify(cfg.compose, goal, rect)
+                    res.seen = why
+                    if ok_seen is False:
+                        # the screen disagrees with the decider — keep going rather than
+                        # reporting a success nobody can see
+                        verified += 1
+                        res.steps.append(f"looked: {why[:80]}")
+                        continue
                 res.ok = True
                 return res
             if op == "stuck":

@@ -7,7 +7,7 @@ ROOT="$(dirname "$HERE")"
 
 # CLIs
 mkdir -p ~/.local/bin
-for b in forge forged forge-mcp forge-sprite-preview forge-sprite-icon; do ln -sf "$ROOT/.venv/bin/$b" ~/.local/bin/$b; done
+for b in forge forged forge-mcp forge-look forge-sprite-preview forge-sprite-icon; do ln -sf "$ROOT/.venv/bin/$b" ~/.local/bin/$b; done
 install -m 755 "$HERE/forge-sprite" ~/.local/bin/forge-sprite
 
 # config + secrets

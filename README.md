@@ -97,6 +97,13 @@ rather than sleeping a fixed amount. Those three ideas come from
 same thing for Chrome over CDP; forge keeps AT-SPI + uinput so it works in every app, in the
 windows you can see.
 
+Before reporting success he takes **one look**: a screenshot of the window goes to the local
+vision model with the goal, and "YES / NO + why" decides whether the run is really done. That
+catches what the accessibility tree can't express — a form that is filled in but still has its
+date picker open over it reads as plausible text and looks obviously unfinished. Once per task,
+never per step; if the extension or the model is missing it says so and keeps the original
+verdict. `desktop.verify: false` turns it off, `forge-look "<goal>"` runs it by hand.
+
 `forge do "in Firefox, search for 'lw-pla filament'"` · `forge windows` shows what he sees.
 Custom-drawn surfaces (games, terminal grids) are invisible to AT-SPI — screenshot+vision is the
 fallback there, not built yet.
