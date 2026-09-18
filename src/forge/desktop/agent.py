@@ -134,7 +134,7 @@ def _leftover(goal: str, domain: str) -> str:
     return " ".join(rest.split()).strip(" .?!,")
 
 
-def _navigate_url(goal: str, cfg: config.Config | None = None) -> str | None:
+def _navigate_url(goal: str, cfg: config.Config | None = None, in_browser: bool = False) -> str | None:
     """A destination for the goal. Order: an address in the text, a quoted/explicit search, then
     — rather than fall back to typing in the address bar and guessing what submits it — a plain
     web search for what was asked. Getting to a results page is always progress; typing blind
@@ -172,7 +172,7 @@ def _navigate_url(goal: str, cfg: config.Config | None = None) -> str | None:
     # 3. nothing addressable, but clearly a web errand → just search for what was asked
     names_local_app = any(re.search(rf"\b{re.escape(n)}\b", goal.lower()) for n in APPS
                           if n not in ("chrome", "firefox"))
-    if WEBBY.search(goal) and not names_local_app:
+    if (WEBBY.search(goal) or in_browser) and not names_local_app:
         q = STOPWORDS.sub("", goal).strip(" .?!")
         if host:                       # "... on openrouter" → search openrouter, not the web
             q = re.sub(r"\bon\s+\w+\s*$", "", q, flags=re.IGNORECASE).strip()
@@ -200,7 +200,7 @@ def _pointer_pos() -> tuple[int, int] | None:
 ADDRESS_BAR = ("search with google or enter address", "address", "url", "location bar")
 
 
-def _questions(els, wins, win, nav_url: str | None = None) -> dict:
+def _questions(els, wins, win, nav_url: str | None = None, hands: bool = False) -> dict:
     """Speculative heads: every target head holds only elements that operation can act on."""
     clickable = [e for e in els if not e.fillable]
     fillable = [e for e in els if e.fillable]
@@ -212,10 +212,13 @@ def _questions(els, wins, win, nav_url: str | None = None) -> dict:
            if not (k == "click" and not clickable) and not (k == "type" and not fillable)
            and not (k == "focus" and not others)
            and not (k in ("scroll", "key") and win is None)
+           # quiet mode has no keyboard or mouse wheel; offering them only leads to a dead end
+           and not (k in ("key", "scroll") and not hands)
            and not (k == "navigate" and not nav_url)}
     q = {"done": Noul(instructions="The goal is fully achieved as things stand."),
-         "operation": Choice(instructions="Best next operation toward the goal.", criteria=ops),
-         "key": Choice(instructions="If pressing a shortcut, which one.", criteria=KEYS)}
+         "operation": Choice(instructions="Best next operation toward the goal.", criteria=ops)}
+    if hands:
+        q["key"] = Choice(instructions="If pressing a shortcut, which one.", criteria=KEYS)
     if clickable:
         q["click_target"] = Choice(instructions="If clicking, which element.",
                                    criteria={str(e.i): e.desc() for e in clickable})
@@ -267,13 +270,15 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                      "windows_on_screen_without_accessibility": opaque[:12],
                      "steps_so_far": res.steps[-6:],
                      "elements": {str(e.i): e.desc() for e in els}}
-            nav_url = _navigate_url(goal, cfg)
+            in_browser = bool(win and win.app.lower() in ("firefox", "chromium", "google-chrome",
+                                                          "chrome", "brave-browser"))
+            nav_url = _navigate_url(goal, cfg, in_browser)
             if nav_url in visited or len(visited) >= 2:
                 nav_url = None          # already went there; work with the page you have
             state["navigate_would_open"] = nav_url or "(nothing new to open — use the page)"
             if visited:
                 state["already_opened"] = visited
-            a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win, nav_url))
+            a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win, nav_url, hands))
             op = a["operation"]["choice"] if "operation" in a else "stuck"
             if a["done"]["noul"] > 0.7 or op == "done":
                 res.ok = True
