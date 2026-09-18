@@ -72,8 +72,14 @@ def main() -> None:
     elif args.cmd == "web":
         from forge.browser import jev
         r = jev.run(" ".join(args.goal), cfg=cfg)
-        print(json.dumps(r.__dict__) if args.json else
-              ("done" if r.ok else f"not done ({r.note})") + f" in {r.elapsed_ms}ms @ {r.title or r.url}")
+        if args.json:
+            print(json.dumps(r.__dict__))
+        else:
+            print(("done" if r.ok else f"not done ({r.note})")
+                  + f" in {r.elapsed_ms}ms @ {r.title or r.url}"
+                  + (f"  (median decision {r.median_decision_ms}ms)" if r.decide_ms else ""))
+            for s in r.steps:
+                print("  ", s)
     elif args.cmd == "windows":
         from forge.desktop import atspi
         for w in atspi.windows():

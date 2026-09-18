@@ -17,7 +17,13 @@ class Result:
     title: str = ""
     note: str = ""
     elapsed_ms: int = 0
+    decide_ms: list[float] = field(default_factory=list)
     seen: str = ""
+
+    @property
+    def median_decision_ms(self) -> float:
+        import statistics
+        return round(statistics.median(self.decide_ms), 1) if self.decide_ms else 0.0
 
 
 def _patch(cfg: config.Config) -> None:
@@ -130,14 +136,22 @@ def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
         with Agent(start, goal) as agent:
             for state in agent.run():
                 res.elapsed_ms = state.get("elapsed_ms", res.elapsed_ms)
-                if d := state.get("decision"):
-                    line = f"{d.get('operation')} {d.get('choice', '')}".strip()
-                    if d.get("value"):
-                        line += f" = {d['value']!r}"
-                    if line and (not res.steps or res.steps[-1] != line):
-                        res.steps.append(line[:120])
-                res.url = state.get("url", res.url)
-                res.title = state.get("title", res.title)
+                # `decision` is cleared once acted on, so the trace lives in `history`:
+                # one entry per executed action, with the decision that produced it.
+                for h in state.get("history", [])[len(res.steps):]:
+                    line = f"{h.get('kind', '?')} {h.get('action', '')}".strip()
+                    if h.get("text"):
+                        line += f" = {h['text']!r}"
+                    p = h.get("probability")
+                    lat = h.get("latency_ms")
+                    if p is not None and lat is not None:
+                        line += f"  [p={p:.2f}, {lat:.0f}ms]"
+                    res.steps.append(line[:140])
+                res.decide_ms = [h["latency_ms"] for h in state.get("history", [])
+                                 if h.get("latency_ms") is not None]
+                page = state.get("page") or {}
+                res.url = page.get("url") or state.get("url") or res.url
+                res.title = page.get("title") or state.get("title") or res.title
                 status = state.get("status", "")
                 if status in ("done", "blocked", "error"):
                     res.ok = status == "done"
