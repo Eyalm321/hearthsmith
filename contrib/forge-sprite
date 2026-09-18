@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Launch the avatar in its own cgroup under the graphical session (not an agent pane's slice).
+# Uses system python: GTK3 bindings come from the distro, not the venv.
+exec systemd-run --user --scope --slice=app-graphical.slice --unit="forge-sprite-$$" \
+  env GDK_BACKEND=x11 PYTHONPATH="$HOME/dev/forge/src" /usr/bin/python3 -m forge.sprite.renderer "$@"
