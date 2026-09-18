@@ -117,23 +117,69 @@ WEBBY = re.compile(r"\b(show me|find|look up|search|open|browse|website|page|doc
                    re.IGNORECASE)
 
 
+ENGINES = {"google.com", "bing.com", "duckduckgo.com", "search.brave.com"}
+SITE_SEARCH = {"github.com": "https://github.com/search?q={q}&type=repositories",
+               "youtube.com": "https://www.youtube.com/results?search_query={q}",
+               "reddit.com": "https://www.reddit.com/search/?q={q}",
+               "openrouter.ai": "https://openrouter.ai/models?q={q}",
+               "huggingface.co": "https://huggingface.co/search/full-text?q={q}"}
+NOISE = re.compile(r"\b(?:go to|open|show me|find|look up|visit|navigate to|the|a|an|on|in|please|"
+                   r"repo|repository|page|site|website)\b", re.IGNORECASE)
+
+
+def _leftover(goal: str, domain: str) -> str:
+    """What the goal asks for beyond the bare domain — 'github.com openshorts repo' → 'openshorts'."""
+    rest = goal.replace(domain, " ")
+    rest = NOISE.sub(" ", rest)
+    return " ".join(rest.split()).strip(" .?!,")
+
+
 def _navigate_url(goal: str, cfg: config.Config | None = None) -> str | None:
     """A destination for the goal. Order: an address in the text, a quoted/explicit search, then
     — rather than fall back to typing in the address bar and guessing what submits it — a plain
     web search for what was asked. Getting to a results page is always progress; typing blind
     isn't."""
     from urllib.parse import quote_plus
-    if u := _goal_url(goal):
-        return u
-    if m := (SEARCH_RE.search(goal) or QUOTED.search(goal)):
-        q = m.group(1).strip().strip("'\"“”‘’")
+
+    def search_on(host: str | None, q: str) -> str:
+        if host in ENGINES:            # searching "on google" is just searching
+            host = None
+        if host and (tmpl := SITE_SEARCH.get(host)):
+            return tmpl.format(q=quote_plus(q))
+        if host:
+            return f"https://www.google.com/search?q={quote_plus(q)}+site:{host}"
         return f"https://www.google.com/search?q={quote_plus(q)}"
+
+    u = _goal_url(goal)
+    host = u.split("//", 1)[-1].split("/")[0].removeprefix("www.") if u else None
+    if host is None:                   # "search youtube for X" names a site without an address
+        host = next((d for n, d in KNOWN_SITES.items()
+                     if re.search(rf"\b{re.escape(n)}\b", goal.lower())), None)
+    deep = bool(u and "/" in u.split("//", 1)[-1])      # a full path — open it as given
+
+    # 1. an explicit query ("search for X", or quoted text) wins, scoped to the named site
+    if not deep and (m := (SEARCH_RE.search(goal) or QUOTED.search(goal))):
+        q = m.group(1).strip().strip("'\"“”‘’")
+        if host and host in q.lower():
+            q = re.sub(re.escape(host), "", q, flags=re.IGNORECASE).strip()
+        if q:
+            return search_on(host, q)
+    if u:
+        # 2. a domain plus other words means "find this on that site", not "open the homepage" —
+        #    otherwise every cycle reopens the front page in a new tab
+        rest = "" if deep else _leftover(goal, host or "")
+        return search_on(host, rest) if rest else u
+    # 3. nothing addressable, but clearly a web errand → just search for what was asked
     names_local_app = any(re.search(rf"\b{re.escape(n)}\b", goal.lower()) for n in APPS
                           if n not in ("chrome", "firefox"))
     if WEBBY.search(goal) and not names_local_app:
         q = STOPWORDS.sub("", goal).strip(" .?!")
+        if host:                       # "... on openrouter" → search openrouter, not the web
+            q = re.sub(r"\bon\s+\w+\s*$", "", q, flags=re.IGNORECASE).strip()
+            q = next((re.sub(rf"\b{re.escape(n)}\b", "", q, flags=re.IGNORECASE).strip()
+                      for n, d in KNOWN_SITES.items() if d == host), q)
         if q:
-            return f"https://www.google.com/search?q={quote_plus(q)}"
+            return search_on(host, q)
     return None
 
 
@@ -196,6 +242,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
     last = None
     expected_ptr = None
     stale_retries = 0
+    visited: list[str] = []
     try:
         for _ in range(max_steps):
             pos = _pointer_pos() if (expected_ptr and not dry) else None
@@ -221,7 +268,11 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                      "steps_so_far": res.steps[-6:],
                      "elements": {str(e.i): e.desc() for e in els}}
             nav_url = _navigate_url(goal, cfg)
-            state["navigate_would_open"] = nav_url or "(no address in the goal)"
+            if nav_url in visited or len(visited) >= 2:
+                nav_url = None          # already went there; work with the page you have
+            state["navigate_would_open"] = nav_url or "(nothing new to open — use the page)"
+            if visited:
+                state["already_opened"] = visited
             a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win, nav_url))
             op = a["operation"]["choice"] if "operation" in a else "stuck"
             if a["done"]["noul"] > 0.7 or op == "done":
@@ -244,9 +295,10 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                 if not u:
                     res.note = "navigate chosen but no address or search in the goal"
                     return res
-                if (op, u) == last:
-                    res.note = "already navigated there"
+                if u in visited:
+                    res.note = "already opened that"
                     return res
+                visited.append(u)
                 last = (op, u)
                 step = f"navigate {u}"
                 if not dry:
