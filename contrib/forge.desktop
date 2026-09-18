@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Name=Forge
+Comment=Pixel blacksmith that nags you about your tasks
+Exec=forge-sprite toggle
+Icon=forge
+Terminal=false
+Categories=Utility;
+Keywords=tasks;nag;pet;
+StartupNotify=false
+Actions=show;hide;heartbeat;
+
+[Desktop Action show]
+Name=Show blacksmith
+Exec=forge-sprite start
+
+[Desktop Action hide]
+Name=Hide blacksmith
+Exec=forge-sprite stop
+
+[Desktop Action heartbeat]
+Name=Nag me now
+Exec=systemctl --user start forged.service

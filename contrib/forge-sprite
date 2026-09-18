@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-# Launch the avatar in its own cgroup under the graphical session (not an agent pane's slice).
-# Uses system python: GTK3 bindings come from the distro, not the venv.
-exec systemd-run --user --scope --slice=app-graphical.slice --unit="forge-sprite-$$" \
-  env GDK_BACKEND=x11 PYTHONPATH="$HOME/dev/forge/src" /usr/bin/python3 -m forge.sprite.renderer "$@"
+# forge-sprite [start|stop|toggle|status]  — the avatar runs as a user service, never in a terminal.
+set -euo pipefail
+U=forge-sprite.service
+case "${1:-toggle}" in
+  start)  systemctl --user start "$U" ;;
+  stop)   systemctl --user stop "$U" ;;
+  status) systemctl --user status "$U" --no-pager ;;
+  toggle) if systemctl --user is-active -q "$U"; then systemctl --user stop "$U"; echo "sprite hidden"
+          else systemctl --user start "$U"; echo "sprite shown"; fi ;;
+  *) echo "usage: forge-sprite [start|stop|toggle|status]" >&2; exit 2 ;;
+esac

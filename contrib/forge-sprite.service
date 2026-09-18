@@ -1,0 +1,18 @@
+[Unit]
+Description=forge avatar (pixel blacksmith overlay)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# system python: GTK3 bindings are distro packages, not in the venv
+ExecStart=/usr/bin/python3 -m forge.sprite.renderer --scale 4 --corner bottom-right
+Environment=PYTHONPATH=%h/dev/forge/src
+Environment=GDK_BACKEND=x11
+Environment=DISPLAY=:0
+Slice=app-graphical.slice
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
