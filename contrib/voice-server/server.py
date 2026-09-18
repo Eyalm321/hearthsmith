@@ -1,4 +1,4 @@
-"""Warm Qwen3-TTS voice-clone server for forge. HTTP on localhost:
+"""Warm Qwen3-TTS voice-clone server for hearthsmith. HTTP on localhost:
   POST /api/tts  {"text": "...", "ref": "/abs/clip.wav", "ref_text": "transcript", "language": "English"}
     -> audio/wav
   GET  /api/health
@@ -24,6 +24,9 @@ PORT = int(os.environ.get("FORGE_VOICE_PORT", "7861"))
 
 _lock = threading.Lock()
 _state = {"model": None, "last": 0.0}
+# encoded reference clips: (ref path, mtime, ref_text) -> voice_clone_prompt. Encoding the 16s
+# clip is ~1.7s of every call otherwise, and the clip never changes between nags.
+_prompts: dict[tuple, object] = {}
 
 
 def ensure():
@@ -44,6 +47,7 @@ def unloader():
         with _lock:
             if _state["model"] is not None and time.time() - _state["last"] > IDLE_SEC:
                 _state["model"] = None
+                _prompts.clear()
                 torch.cuda.empty_cache()
                 print("[voice] unloaded (idle)", flush=True)
 
@@ -55,7 +59,7 @@ class TTSRequest(BaseModel):
     language: str = "English"
 
 
-app = FastAPI(title="forge voice (Qwen3-TTS clone)")
+app = FastAPI(title="hearthsmith voice (Qwen3-TTS clone)")
 
 
 @app.get("/api/health")
@@ -72,8 +76,11 @@ def tts(req: TTSRequest):
     model = ensure()
     with _lock:  # one GPU, one job at a time
         t = time.time()
+        key = (req.ref, os.path.getmtime(req.ref), req.ref_text)
+        if key not in _prompts:
+            _prompts[key] = model.create_voice_clone_prompt(ref_audio=req.ref, ref_text=req.ref_text)
         wavs, sr = model.generate_voice_clone(text=req.text, language=req.language,
-                                              ref_audio=req.ref, ref_text=req.ref_text)
+                                              voice_clone_prompt=_prompts[key])
         print(f"[voice] {len(wavs[0]) / sr:.1f}s audio in {time.time() - t:.1f}s: {req.text[:60]!r}",
               flush=True)
     buf = io.BytesIO()

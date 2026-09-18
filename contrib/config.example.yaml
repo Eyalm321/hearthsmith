@@ -1,16 +1,16 @@
-# ~/.config/forge/config.yaml — every key optional; see src/forge/config.py
+# ~/.config/hearthsmith/config.yaml — every key optional; see src/hearthsmith/config.py
 decide:
   backend: openrouter              # openrouter (Jev) | typesafe | adapter | rules
   adapter_model: deepseek/deepseek-v4.1-flash
   adapter_base_url: https://openrouter.ai/api/v1
-  adapter_key_env: DSH_OPENROUTER_API_KEY
+  adapter_key_env: OPENROUTER_API_KEY
 compose:
   ollama_url: http://admins-mac-mini.local:11434
   ollama_model: hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q5_K_M
   fallback_model: deepseek/deepseek-v4.1-flash
 hyperpanes:
   allow_pane_input: false          # /input is arbitrary command exec; keep off
-  delegate_queue: forge
+  delegate_queue: hearthsmith
   delegate_enabled: false      # turn on once a worker drains the queue
 desktop:
   hands: false                 # true = he may use the real mouse/keyboard (exclusive)
@@ -28,7 +28,7 @@ voice:
   enabled: true                    # he says nags and answers out loud, on top of sprite/pane/notify
   engines: [auk, qwen]             # tried in order; auk = HF space (best, ~8 free lines/day), qwen = local server
   variant: "AuK-Flash ⚡"           # or "AuK (Base)": slower, cleaner
-  qwen_url: http://127.0.0.1:7861  # ~/dev/forge-voice, forge-voice.service (Qwen3-TTS-0.6B, fp32)
+  qwen_url: http://127.0.0.1:7861  # ~/dev/hearthsmith-voice, hearthsmith-voice.service (Qwen3-TTS-0.6B, fp32)
   ref: assets/voice/dwarf.wav      # the clip IS the voice — swap it (and ref_text) and he sounds like someone else
   ref_text: assets/voice/dwarf.txt
   sink: ""                         # PipeWire sink name (`pactl list sinks short`); "" = default output

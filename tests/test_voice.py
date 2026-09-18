@@ -1,4 +1,4 @@
-from forge.voice import chunk, seconds_for
+from hearthsmith.voice import chunk, seconds_for
 
 
 def test_short_nag_is_one_chunk():

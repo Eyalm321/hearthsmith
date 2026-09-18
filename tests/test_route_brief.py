@@ -1,6 +1,6 @@
 import pytest
 
-from forge.route import _brief, _native_terminal, _wants_agent
+from hearthsmith.route import _brief, _native_terminal, _wants_agent
 
 
 @pytest.mark.parametrize("text", [
@@ -11,7 +11,7 @@ from forge.route import _brief, _native_terminal, _wants_agent
     "could you open up a shell for me?",
     "open a new pane with claude",
     "spawn an agent in forge",
-    "open a terminal in ~/dev/forge",
+    "open a terminal in ~/dev/hearthsmith",
     "on hyperpanes, open a pane",
 ])
 def test_only_plumbing_has_no_brief(text):

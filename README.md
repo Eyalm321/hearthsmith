@@ -1,14 +1,16 @@
-# forge
+# hearthsmith
 
-A pixel-art blacksmith that nags you about your tasks.
+A pixel-art blacksmith who lives on your desktop, nags you about your tasks, watches your terminal panes, and hands work to your coding agents.
 
-Harness-agnostic: forge **owns the task store** (SQLite) and exposes it over MCP, so Claude Code,
+*Formerly `forge`. Renamed because nobody can find a project called forge.*
+
+Harness-agnostic: hearthsmith **owns the task store** (SQLite) and exposes it over MCP, so Claude Code,
 dsh, Codex, OpenClaw or a shell are all just clients. [hyperpanes](https://github.com/Eyalm321/hyperpanes)
 is first-class: the pet reads what you're doing from your panes, nags you *in* the relevant pane,
 and can hand a task to a worker pane instead of nagging.
 
 ```
-timer ─▶ forged heartbeat
+timer ─▶ hearthsmithd heartbeat
           ├─ T0  sense    hyperpanes /state + /projects + pane screens, tasks.md, the store   (no model)
           ├─ T1  decide   Jev typed decision: nag? which task? urgency? channel?              (~400ms / ~$0.00002)
           ├─ T2  compose  Ornith-1.5-9B on a local Ollama writes the blacksmith's line        (free, private)
@@ -25,9 +27,9 @@ down → OpenRouter → template. The loop never goes silent because a dependenc
 
 ```sh
 uv sync && uv pip install -e .
-forge add "temper the blade" --due 2026-09-20T18:00 --project forge
-forge state            # the exact paragraph the decider sees
-forged --once --dry    # decide + compose, deliver nothing
+hearthsmith add "temper the blade" --due 2026-09-20T18:00 --project hearthsmith
+hearthsmith state            # the exact paragraph the decider sees
+hearthsmithd --once --dry    # decide + compose, deliver nothing
 ```
 
 Ask him a question and he answers it rather than reporting that a page was opened. One page
@@ -37,12 +39,12 @@ people charge on average", "compare X and Y") → he puts an agent on it in its 
 the answer back on the next heartbeat, attached to the task.
 
 Everything he is asked to do is recorded: the goal, which body ran it, whether it worked, the
-steps he took with their confidence and decision latency, and what the verifier saw. `forge runs`
-lists them, `forge runs <id>` shows one. Values you typed into his dialog are stored as
+steps he took with their confidence and decision latency, and what the verifier saw. `hearthsmith runs`
+lists them, `hearthsmith runs <id>` shows one. Values you typed into his dialog are stored as
 "(from you)" — a credential never reaches the history.
 
-Config: `~/.config/forge/config.yaml` (every key optional, see `src/forge/config.py`).
-State: `~/.local/state/forge/` (`forge.db`, `sprite.json`).
+Config: `~/.config/hearthsmith/config.yaml` (every key optional, see `src/hearthsmith/config.py`).
+State: `~/.local/state/hearthsmith/` (`hearthsmith.db`, `sprite.json`).
 
 ### Decide backends (`decide.backend`)
 
@@ -58,29 +60,31 @@ Same `Noul` / `Score` / `Choice` questions in every backend — swapping is a co
 ## MCP
 
 ```sh
-claude mcp add forge -- $(pwd)/.venv/bin/forge-mcp
+claude mcp add hearthsmith -- $(pwd)/.venv/bin/hearthsmith-mcp
 ```
 
-Tools: `forge_tasks_list / _add / _done / _block / _snooze`, `forge_nags_recent`.
+Tools: `hearthsmith_tasks_list / _add / _done / _block / _snooze`, `hearthsmith_nags_recent`.
 
 ## tasks.md
 
 Zero-dep importer. `- [ ] title @due(2026-09-20) +project #tag`. One-way: file → store; tick the box
-to mark done. forge never writes the file.
+to mark done. hearthsmith never writes the file.
 
 ## hyperpanes
 
 Reads `~/.local/state/hyperpanes/control.json` for port + token. Nags go through
 `POST /panes/{id}/messages` (out-of-band, to the pane's agent). `POST /panes/{id}/input` is
 arbitrary command execution and stays off unless `hyperpanes.allow_pane_input: true`.
-Delegation enqueues to `hyperpanes.delegate_queue` (default `forge`); drain it with
-`hyperpanes worker --queue forge -- <cmd>`.
+Delegation enqueues to `hyperpanes.delegate_queue` (default `hearthsmith`); drain it with
+`hyperpanes worker --queue hearthsmith -- <cmd>`.
 
 ## Avatar
 
-Not built yet. The daemon writes `sprite.json` (`state ∈ idle | forge | alert | sleep`, `text`,
-`urgency`); the renderer is a separate process. Plan: layered spritesheets + palette LUT so the
-blacksmith is customizable without new art.
+An always-on-top, click-through GTK window (`hearthsmith-sprite.service`) that polls
+`sprite.json` (`state ∈ idle | forge | alert | sleep`, `text`, `urgency`) and plays the matching
+frames from a sprite pack sliced out of `assets/sheets/`. Left click talks to him, drag moves him,
+right click is the menu (size, corner, sheet, nag now, hide). Position and size persist in
+`~/.config/hearthsmith/avatar.yaml`. If the frame clock stalls he remaps himself, then restarts.
 
 While either body works, the avatar narrates it — "clicking One way", "typing Where from? =
 'Zurich'" — so a task running in his Chrome is still visible on your desktop. Progress lines skip
@@ -102,15 +106,15 @@ order (`voice.engines`), same clip into both:
   [HF space](https://huggingface.co/spaces/tencent/AuK) via `gradio_client`. Best clone. Wants
   ~17 GiB so it can't run here, and free ZeroGPU quota is ~8 lines/day (`hf auth login` helps;
   PRO gives 40 min/day).
-- **qwen** — Qwen3-TTS-0.6B-Base (Apache-2.0), warm server in `~/dev/forge-voice`
-  (`forge-voice.service`, :7861). fp32 on the 2080 Ti — fp16 NaNs on Turing — ~4 GiB resident,
+- **qwen** — Qwen3-TTS-0.6B-Base (Apache-2.0), warm server in `~/dev/hearthsmith-voice`
+  (`hearthsmith-voice.service`, :7861). fp32 on the 2080 Ti — fp16 NaNs on Turing — ~4 GiB resident,
   ~6s a line, unloads after 15 min idle. Unlimited.
 
-Wavs are cached by text+clip+engine under `~/.local/state/forge/voice/`. Playback is `pw-play`
-to the default sink, blocking, because `forged` is a oneshot unit.
+Wavs are cached by text+clip+engine under `~/.local/state/hearthsmith/voice/`. Playback is `pw-play`
+to the default sink, blocking, because `hearthsmithd` is a oneshot unit.
 
 ```sh
-forge speak "Oi. That ledger's got rust on it."   # hear him; --no-play prints the wav paths
+hearthsmith speak "Oi. That ledger's got rust on it."   # hear him; --no-play prints the wav paths
 ```
 
 ## Two bodies, one brain
@@ -127,7 +131,7 @@ ignores anything that isn't a real DOM event, so a site like Google Flights beat
 input. Two upstream lines are wrapped rather than forked — decisions go to the OpenRouter
 Decisions router (the Jev access this machine has), and the tab opens in the foreground so you
 can watch. He gets his own Chrome profile because Chrome 136+ refuses remote debugging on the
-default one; `forge web "<goal>"` runs it directly, and the `browse` intent routes there.
+default one; `hearthsmith web "<goal>"` runs it directly, and the `browse` intent routes there.
 
 ## Computer use
 
@@ -142,7 +146,7 @@ elements, ~0.5s), act = AT-SPI actions first, `/dev/uinput` only under `--hands`
 
 Setup (once):
 - `gsettings set org.gnome.desktop.interface toolkit-accessibility true` (install.sh does it)
-- the `forge-windows` GNOME Shell extension (`contrib/gnome-extension`, install.sh copies it;
+- the `hearthsmith-windows` GNOME Shell extension (`contrib/gnome-extension`, install.sh copies it;
   enable + log out/in once). Wayland hides window positions from clients; the extension exposes
   frame rects over the session bus, read-only.
 - user in the `input` group (for `/dev/uinput`).
@@ -153,7 +157,7 @@ wins already has its target. Before acting he re-reads the element (gone, hidden
 re-observe instead of clicking blind), and after acting he waits for the tree to actually change
 rather than sleeping a fixed amount. Those three ideas come from
 [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (MIT), which does the
-same thing for Chrome over CDP; forge keeps AT-SPI + uinput so it works in every app, in the
+same thing for Chrome over CDP; hearthsmith keeps AT-SPI + uinput so it works in every app, in the
 windows you can see.
 
 Before reporting success he takes **one look**: a screenshot of the window goes to the local
@@ -161,8 +165,8 @@ vision model with the goal, and "YES / NO + why" decides whether the run is real
 catches what the accessibility tree can't express — a form that is filled in but still has its
 date picker open over it reads as plausible text and looks obviously unfinished. Once per task,
 never per step; if the extension or the model is missing it says so and keeps the original
-verdict. `desktop.verify: false` turns it off, `forge-look "<goal>"` runs it by hand.
+verdict. `desktop.verify: false` turns it off, `hearthsmith-look "<goal>"` runs it by hand.
 
-`forge do "in Firefox, search for 'lw-pla filament'"` · `forge windows` shows what he sees.
+`hearthsmith do "in Firefox, search for 'lw-pla filament'"` · `hearthsmith windows` shows what he sees.
 Custom-drawn surfaces (games, terminal grids) are invisible to AT-SPI — screenshot+vision is the
 fallback there, not built yet.

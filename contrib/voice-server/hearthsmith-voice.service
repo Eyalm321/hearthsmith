@@ -1,0 +1,15 @@
+[Unit]
+Description=hearthsmith voice: warm Qwen3-TTS voice-clone server on 127.0.0.1:7861
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dev/hearthsmith-voice
+ExecStart=%h/dev/hearthsmith-voice/.venv/bin/python %h/dev/hearthsmith/contrib/voice-server/server.py
+Environment=PYTHONUNBUFFERED=1
+Environment=FORGE_VOICE_IDLE=900
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

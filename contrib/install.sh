@@ -7,48 +7,53 @@ ROOT="$(dirname "$HERE")"
 
 # CLIs
 mkdir -p ~/.local/bin
-for b in forge forged forge-mcp forge-look forge-sprite-preview forge-sprite-icon; do ln -sf "$ROOT/.venv/bin/$b" ~/.local/bin/$b; done
-install -m 755 "$HERE/forge-sprite" ~/.local/bin/forge-sprite
+for b in hearthsmith hearthsmithd hearthsmith-mcp hearthsmith-look hearthsmith-sprite-preview hearthsmith-sprite-icon; do ln -sf "$ROOT/.venv/bin/$b" ~/.local/bin/$b; done
+install -m 755 "$HERE/hearthsmith-sprite" ~/.local/bin/hearthsmith-sprite
 
 # config + secrets
-mkdir -p ~/.config/forge
-[ -f ~/.config/forge/config.yaml ] || cp "$HERE/config.example.yaml" ~/.config/forge/config.yaml
-if [ ! -f ~/.config/forge/env ]; then
-  # pull the OpenRouter key from the dsh secrets file if present; never echoes it
-  { echo "# sourced by forged.service"; grep -E "^DSH_OPENROUTER_API_KEY=" ~/.dsh-jarvis/secrets/secrets.env 2>/dev/null || true; } > ~/.config/forge/env
-  chmod 600 ~/.config/forge/env
+mkdir -p ~/.config/hearthsmith
+[ -f ~/.config/hearthsmith/config.yaml ] || cp "$HERE/config.example.yaml" ~/.config/hearthsmith/config.yaml
+if [ ! -f ~/.config/hearthsmith/env ]; then
+  # KEY=value lines sourced by hearthsmithd.service (and `hearthsmith say` from the sprite).
+  # Seeded from the current environment if the key is exported; never echoed.
+  { echo "# sourced by hearthsmithd.service"
+    [ -n "${OPENROUTER_API_KEY:-}" ] && echo "OPENROUTER_API_KEY=$OPENROUTER_API_KEY"
+    true; } > ~/.config/hearthsmith/env
+  chmod 600 ~/.config/hearthsmith/env
+  [ -n "${OPENROUTER_API_KEY:-}" ] || echo "NOTE: put OPENROUTER_API_KEY=... in ~/.config/hearthsmith/env"
 fi
 
-# sprite pack: slice the shipped sheet into ~/.config/forge/pack unless one already exists
-# (FORGE_SHEET=blacksmith-b for the stockier dwarf cut)
-if [ ! -f ~/.config/forge/pack/manifest.json ]; then
-  "$ROOT/.venv/bin/forge-sprite-slice" "$ROOT/assets/sheets/${FORGE_SHEET:-blacksmith-a}.png" ~/.config/forge/pack --cell 96
+# sprite pack: slice the shipped sheet into ~/.config/hearthsmith/pack unless one already exists
+# (HEARTHSMITH_SHEET=blacksmith-b for the stockier dwarf cut)
+if [ ! -f ~/.config/hearthsmith/pack/manifest.json ]; then
+  "$ROOT/.venv/bin/hearthsmith-sprite-slice" "$ROOT/assets/sheets/${HEARTHSMITH_SHEET:-blacksmith-a}.png" ~/.config/hearthsmith/pack --cell 96
 fi
 
 # systemd user units: heartbeat timer + avatar service
 mkdir -p ~/.config/systemd/user
-cp "$HERE/forged.service" "$HERE/forged-now.service" "$HERE/forged.timer" "$HERE/forge-sprite.service" ~/.config/systemd/user/
+cp "$HERE/hearthsmithd.service" "$HERE/hearthsmithd-now.service" "$HERE/hearthsmithd.timer" ~/.config/systemd/user/
+sed "s|@ROOT@|$ROOT|g" "$HERE/hearthsmith-sprite.service" > ~/.config/systemd/user/hearthsmith-sprite.service
 systemctl --user daemon-reload
-systemctl --user enable --now forged.timer
-systemctl --user enable forge-sprite.service
-systemctl --user restart forge-sprite.service
+systemctl --user enable --now hearthsmithd.timer
+systemctl --user enable hearthsmith-sprite.service
+systemctl --user restart hearthsmith-sprite.service
 
 # computer use: a11y bus on + window-geometry extension (Wayland hides frame rects otherwise)
 gsettings set org.gnome.desktop.interface toolkit-accessibility true
 mkdir -p ~/.local/share/gnome-shell/extensions
-rm -rf ~/.local/share/gnome-shell/extensions/forge-windows@forge
-cp -r "$HERE/gnome-extension/forge-windows@forge" ~/.local/share/gnome-shell/extensions/
-gnome-extensions enable forge-windows@forge 2>/dev/null || true
+rm -rf ~/.local/share/gnome-shell/extensions/hearthsmith-windows@hearthsmith
+cp -r "$HERE/gnome-extension/hearthsmith-windows@hearthsmith" ~/.local/share/gnome-shell/extensions/
+gnome-extensions enable hearthsmith-windows@hearthsmith 2>/dev/null || true
 id -nG | grep -qw input || echo "NOTE: add yourself to the input group for /dev/uinput: sudo usermod -aG input $USER (re-login)"
 echo "NOTE: new GNOME extensions load on next login (Wayland can't hot-reload the shell)"
 
 # app launcher + icon (+ autostart is the service's WantedBy=graphical-session.target)
 mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
-cp "$HERE/forge.png" ~/.local/share/icons/hicolor/256x256/apps/forge.png
-cp "$HERE/forge.desktop" ~/.local/share/applications/forge.desktop
+cp "$HERE/hearthsmith.png" ~/.local/share/icons/hicolor/256x256/apps/hearthsmith.png
+cp "$HERE/hearthsmith.desktop" ~/.local/share/applications/hearthsmith.desktop
 update-desktop-database ~/.local/share/applications 2>/dev/null || true
 gtk-update-icon-cache -q ~/.local/share/icons/hicolor 2>/dev/null || true
 
-systemctl --user list-timers forged.timer --no-pager
-systemctl --user is-active forge-sprite.service && echo "avatar: running (forge-sprite toggle to hide)"
-echo "first nag: systemctl --user start forged.service && journalctl --user -u forged -n 20"
+systemctl --user list-timers hearthsmithd.timer --no-pager
+systemctl --user is-active hearthsmith-sprite.service && echo "avatar: running (hearthsmith-sprite toggle to hide)"
+echo "first nag: systemctl --user start hearthsmithd.service && journalctl --user -u hearthsmithd -n 20"

@@ -1,0 +1,19 @@
+[Unit]
+Description=hearthsmith avatar (pixel blacksmith overlay)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# system python: GTK3 bindings are distro packages, not in the venv
+ExecStart=/usr/bin/python3 -m hearthsmith.sprite.renderer --corner bottom-right
+Environment=PYTHONPATH=@ROOT@/src
+Environment=GDK_BACKEND=x11
+Environment=PYTHONUNBUFFERED=1
+Environment=DISPLAY=:0
+Slice=app-graphical.slice
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

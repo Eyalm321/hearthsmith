@@ -8,7 +8,7 @@ Layout: 4 columns x 2 rows of equal cells, generous gap between cells, transpare
 Row 1: idle A (relaxed); idle B (chest slightly higher, breathing); hammer raised high overhead; hammer struck down with orange sparks and a small flame.
 Row 2: alert A (hammer raised, mouth open shouting); alert B (same, white exclamation mark above head); sleep A (eyes closed, leaning on hammer); sleep B (same, two small Z's floating).
 """ + seed_note
-key = os.environ["DSH_OPENROUTER_API_KEY"]
+key = os.environ["OPENROUTER_API_KEY"]
 t = time.time()
 r = httpx.post("https://openrouter.ai/api/v1/images", timeout=300,
     headers={"Authorization": f"Bearer {key}"},

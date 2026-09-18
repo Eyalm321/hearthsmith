@@ -1,5 +1,5 @@
 [project]
-name = "forge"
+name = "hearthsmith"
 version = "0.1.0"
 description = "A pixel-art blacksmith that nags you about your tasks. Harness-agnostic task store + MCP server + heartbeat daemon."
 readme = "README.md"
@@ -18,13 +18,13 @@ dependencies = [
 ]
 
 [project.scripts]
-forged = "forge.daemon:main"
-forge = "forge.cli:main"
-forge-mcp = "forge.mcp_server:main"
-forge-sprite-preview = "forge.sprite.preview:main"
-forge-sprite-icon = "forge.sprite.preview:icon_main"
-forge-sprite-slice = "forge.sprite.slice:main"
-forge-look = "forge.desktop.vision:_cli"
+hearthsmithd = "hearthsmith.daemon:main"
+hearthsmith = "hearthsmith.cli:main"
+hearthsmith-mcp = "hearthsmith.mcp_server:main"
+hearthsmith-sprite-preview = "hearthsmith.sprite.preview:main"
+hearthsmith-sprite-icon = "hearthsmith.sprite.preview:icon_main"
+hearthsmith-sprite-slice = "hearthsmith.sprite.slice:main"
+hearthsmith-look = "hearthsmith.desktop.vision:_cli"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
@@ -35,7 +35,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/forge"]
+packages = ["src/hearthsmith"]
 
 [tool.hatch.metadata]
 # jev-ultrafast is a git dependency
@@ -54,4 +54,4 @@ ignore = ["DTZ"]
 [tool.ruff.lint.per-file-ignores]
 # walking a live accessibility tree: any node can go defunct between two calls, and logging
 # each one would drown the journal in noise — skipping the node IS the handling
-"src/forge/desktop/atspi.py" = ["S110", "S112"]
+"src/hearthsmith/desktop/atspi.py" = ["S110", "S112"]

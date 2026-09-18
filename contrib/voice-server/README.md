@@ -1,13 +1,13 @@
-# forge voice server
+# hearthsmith voice server
 
-Warm Qwen3-TTS-0.6B-Base voice-clone server on `127.0.0.1:7861`. forge's `qwen` engine
+Warm Qwen3-TTS-0.6B-Base voice-clone server on `127.0.0.1:7861`. hearthsmith's `qwen` engine
 (`voice.engines`) posts `{text, ref, ref_text}` and gets a wav back.
 
 ```sh
-mkdir -p ~/dev/forge-voice && cd ~/dev/forge-voice
+mkdir -p ~/dev/hearthsmith-voice && cd ~/dev/hearthsmith-voice
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python qwen-tts soundfile
-cp ~/dev/forge/contrib/voice-server/forge-voice.service ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user enable --now forge-voice.service
+cp ~/dev/hearthsmith/contrib/voice-server/hearthsmith-voice.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now hearthsmith-voice.service
 curl -s localhost:7861/api/health
 ```
 

@@ -1,5 +1,5 @@
-from forge.adapters import markdown
-from forge.store import Store
+from hearthsmith.adapters import markdown
+from hearthsmith.store import Store
 
 
 def test_markdown_import(tmp_path):

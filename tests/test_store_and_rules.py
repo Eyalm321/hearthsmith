@@ -1,7 +1,7 @@
 import time
 
-from forge.decide import rules
-from forge.store import Store
+from hearthsmith.decide import rules
+from hearthsmith.store import Store
 
 
 def test_add_list_done(tmp_path):
@@ -41,7 +41,7 @@ def test_rules_respects_gap(tmp_path):
 def test_wire_shapes():
     from typesafe_sdk import Choice, Noul, Score
 
-    from forge.decide import _wire
+    from hearthsmith.decide import _wire
     assert _wire(Noul(instructions="x")) == {"type": "noul", "instructions": "x"}
     assert _wire(Score(instructions="x", criteria=["a", "b"])) == {
         "type": "score", "instructions": "x", "criteria": ["a", "b"]}
@@ -49,8 +49,8 @@ def test_wire_shapes():
 
 
 def test_route_falls_back_to_store_when_decider_down(tmp_path, monkeypatch):
-    from forge import config as c
-    from forge.route import route
+    from hearthsmith import config as c
+    from hearthsmith.route import route
     cfg = c.Config(db_path=tmp_path / "t.db", sprite_path=tmp_path / "s.json")
     cfg.nag.markdown_file = None
     cfg.hyperpanes.control_file = tmp_path / "nope.json"
@@ -61,8 +61,8 @@ def test_route_falls_back_to_store_when_decider_down(tmp_path, monkeypatch):
 
 def test_speculative_heads_scope_targets():
     """Each target head must offer only elements that operation can act on."""
-    from forge.desktop.agent import _questions
-    from forge.desktop.atspi import Element, Window
+    from hearthsmith.desktop.agent import _questions
+    from hearthsmith.desktop.atspi import Element, Window
 
     def el(i, role, name, fillable):
         return Element(i, role, name, 0, 0, 10, 10, fillable, "app", "win")
@@ -82,7 +82,7 @@ def test_speculative_heads_scope_targets():
 
 
 def test_sensitive_fields_are_never_guessed():
-    from forge.ask import sensitive
+    from hearthsmith.ask import sensitive
     assert sensitive("Password") == "secret"
     assert sensitive("Confirm password") == "secret"
     assert sensitive("Verification code") == "secret"
@@ -93,9 +93,9 @@ def test_sensitive_fields_are_never_guessed():
 
 
 def test_desktop_refuses_to_invent_a_password(monkeypatch, tmp_path):
-    from forge import ask as asker
-    from forge import config as c
-    from forge.desktop.agent import _fill_value
+    from hearthsmith import ask as asker
+    from hearthsmith import config as c
+    from hearthsmith.desktop.agent import _fill_value
     monkeypatch.setattr(asker, "ask", lambda *a, **k: None)      # user cancels
     cfg = c.Config(db_path=tmp_path / "t.db")
     try:
@@ -107,7 +107,7 @@ def test_desktop_refuses_to_invent_a_password(monkeypatch, tmp_path):
 
 
 def test_question_routing():
-    from forge.answer import is_question, needs_lookup, wants_research
+    from hearthsmith.answer import is_question, needs_lookup, wants_research
     assert needs_lookup("what does the p2s cost")            # one page holds it
     assert not wants_research("what does the p2s cost")
     assert wants_research("how much do engineers charge on average")
@@ -117,6 +117,6 @@ def test_question_routing():
 
 
 def test_answer_refuses_when_the_page_does_not_say(tmp_path):
-    from forge import config as c
-    from forge.answer import from_page
+    from hearthsmith import config as c
+    from hearthsmith.answer import from_page
     assert from_page(c.Config(db_path=tmp_path / "t.db"), "what does it cost", "") is None
