@@ -85,6 +85,26 @@ class NagCfg:
 
 
 @dataclass
+class VoiceCfg:
+    """How he sounds. AuK (Tencent) clones the voice zero-shot from one reference clip, so the
+    voice IS the clip: swap `ref` and he speaks like someone else. The model wants ~17 GiB, more
+    than any card here, so it runs on the HF space; `space` can point at a self-hosted Gradio
+    (`http://host:7860`) later without touching code."""
+    enabled: bool = True
+    space: str = "tencent/AuK"
+    # WoW dwarf NPC lines, 16s. A gruff blacksmith should sound like one.
+    ref: Path = Path(__file__).resolve().parent.parent.parent / "assets/voice/dwarf.wav"
+    variant: str = "AuK (Base)"  # or "AuK-Flash ⚡": 4 steps, faster, rougher
+    seed: int = 42
+    # he talks at dwarf pace; the space needs to be told how long the clip is
+    words_per_second: float = 2.6
+    max_chunk_seconds: float = 14.0
+    timeout_seconds: int = 150  # space queue + ~20s synth; heartbeat has 300
+    cache_dir: Path = STATE_DIR / "voice"
+    hf_token_env: str = "HF_TOKEN"  # optional; anonymous ZeroGPU quota is small
+
+
+@dataclass
 class Config:
     decide: DecideCfg = field(default_factory=DecideCfg)
     compose: ComposeCfg = field(default_factory=ComposeCfg)
@@ -92,6 +112,7 @@ class Config:
     desktop: DesktopCfg = field(default_factory=DesktopCfg)
     browser: BrowserCfg = field(default_factory=BrowserCfg)
     nag: NagCfg = field(default_factory=NagCfg)
+    voice: VoiceCfg = field(default_factory=VoiceCfg)
     db_path: Path = STATE_DIR / "forge.db"
     sprite_path: Path = STATE_DIR / "sprite.json"
 

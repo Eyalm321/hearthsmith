@@ -14,7 +14,7 @@ from forge.adapters import markdown
 from forge.adapters.hyperpanes import Hyperpanes
 from forge.compose import compose
 from forge.decide import Decision, decide
-from forge.sinks import HyperpanesSink, NotifySink, SpriteSink
+from forge.sinks import HyperpanesSink, NotifySink, SpriteSink, VoiceSink
 from forge.store import Store, Task
 
 log = logging.getLogger("forge")
@@ -88,12 +88,14 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
     """force = the user asked ("Nag me now", `forge say "what should I do"`): skip the quiet-hours
     and min-gap gates and always say something, even if Jev would have stayed quiet."""
     sprite = SpriteSink(cfg.sprite_path)
+    voice = VoiceSink(cfg.voice)
     # an answer you asked for outranks a reminder you didn't
     for found in collect_research(cfg, store, hp):
         text = f"Your answer on '{found['question'][:60]}': {found['answer'][:400]}"
         if not dry:
             if not sprite.send(text, "soon", None):
                 NotifySink().send(text, "soon", None)
+            voice.send(text, "soon", None)
             store.log_nag(found.get("task_id"), "research", "soon", text, "{}")
         return {"answered": found["question"], "answer": found["answer"][:400]}
 
@@ -126,6 +128,8 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
             sprite.write("idle", text, "ignorable")
             if not dry and not sprite.alive():
                 NotifySink().send(text, "ignorable", None)
+            if not dry:
+                voice.send(text, "ignorable", None)
             return {"forced": True, "text": text}
         d.task_id = tasks[0].id
 
@@ -166,6 +170,9 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
         delivered.append("notify")
     if not delivered:
         sprite.write("alert" if d.urgency == "now" else "forge", text, d.urgency)
+    # the voice rides on top of whatever carried the words
+    if voice.send(text, d.urgency, task):
+        delivered.append("voice")
     store.mark_nagged(task.id)
     store.log_nag(task.id, ",".join(delivered) or "none", d.urgency, text, d.as_json())
     store.record_run(f"nag about {task.title}", "nag", bool(delivered),

@@ -13,6 +13,8 @@ dependencies = [
     "pyyaml>=6",
     # his browser body: a DOM snapshot + CDP beats AT-SPI inside a page
     "jev-ultrafast @ git+https://github.com/browser-use/jev-ultrafast",
+    # his voice: AuK zero-shot clone, served by the HF space (no GPU here big enough)
+    "gradio_client>=1.0",
 ]
 
 [project.scripts]
@@ -34,6 +36,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/forge"]
+
+[tool.hatch.metadata]
+# jev-ultrafast is a git dependency
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"

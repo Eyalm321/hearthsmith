@@ -24,3 +24,9 @@ nag:
   quiet_hours: [23, 8]
   markdown_file: ~/tasks.md
   channels: [hyperpanes, notify]
+voice:
+  enabled: true                    # he says nags out loud (pw-play), on top of sprite/pane/notify
+  space: tencent/AuK               # AuK zero-shot clone on the HF space; or http://host:7860 self-hosted
+  ref: assets/voice/dwarf.wav      # the clip IS the voice — swap it, he sounds like someone else
+  variant: AuK (Base)              # or "AuK-Flash ⚡" (4-step, faster, rougher)
+  hf_token_env: HF_TOKEN           # optional; anonymous ZeroGPU quota is small

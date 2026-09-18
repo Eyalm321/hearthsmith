@@ -15,6 +15,7 @@ timer ─▶ forged heartbeat
           ├─ T3  fallback OpenRouter chat model when the local box is asleep
           └─ deliver      notify-send | hyperpanes pane message | delegate to a worker queue
                           + writes sprite.json for the avatar renderer
+                          + says it out loud in his own voice (AuK clone, see Voice)
 ```
 
 Every stage degrades: no hyperpanes → store-only state; decider down → rule heuristics; Ollama
@@ -89,6 +90,21 @@ Work aimed at an agent goes to the right one: panes **already in that project** 
 each described by what it is actually doing (its last few lines, not its label), and the question
 is whether the assignment continues that work or is a separate concern deserving its own agent. A
 busy agent is only interrupted when it really is the same thread of work.
+
+## Voice
+
+He sounds like a dwarf. `assets/voice/dwarf.wav` is 16s of WoW dwarf NPC lines;
+[AuK](https://github.com/Tencent-Hunyuan/AuK) (Tencent, MIT) clones it zero-shot per line, so the
+clip *is* the voice — drop in another wav (`voice.ref`) and he is someone else. The model wants
+~17 GiB, so synthesis runs on the [HF space](https://huggingface.co/spaces/tencent/AuK) via
+`gradio_client` (~20s a line, cached forever by text+clip under `~/.local/state/forge/voice/`);
+`voice.space` takes a self-hosted Gradio URL when a big enough card shows up. Anonymous ZeroGPU
+quota lasts about three lines — `hf auth login` once (or `HF_TOKEN` in `~/.config/forge/env`).
+Playback is `pw-play`, blocking, because `forged` is a oneshot unit.
+
+```sh
+forge speak "Oi. That ledger's got rust on it."   # hear him; --no-play prints the wav path
+```
 
 ## Two bodies, one brain
 

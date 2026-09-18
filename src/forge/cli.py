@@ -40,6 +40,7 @@ def main() -> None:
     sub.add_parser("windows", help="what the smith can see on screen")
     bw = sub.add_parser("web", help="run a goal in his Chrome (jev-ultrafast over CDP)"); bw.add_argument("goal", nargs="+"); bw.add_argument("--json", action="store_true")
     sy = sub.add_parser("say", help="tell the blacksmith something; Jev routes it"); sy.add_argument("text", nargs="+"); sy.add_argument("--json", action="store_true")
+    sp = sub.add_parser("speak", help="hear him say it (AuK clone of assets/voice)"); sp.add_argument("text", nargs="+"); sp.add_argument("--no-play", action="store_true", help="synth only, print wav paths")
     args = ap.parse_args()
 
     cfg = config.load()
@@ -95,6 +96,16 @@ def main() -> None:
         r = route(" ".join(args.text), cfg)
         print(json.dumps({"intent": r.intent, "text": r.text, "task_id": r.task_id, "target": r.target}) if args.json
               else f"[{r.intent}] {r.text}")
+    elif args.cmd == "speak":
+        from forge.voice import Voice
+        v = Voice(cfg.voice)
+        if not v.available():
+            raise SystemExit(f"voice off or reference clip missing: {cfg.voice.ref}")
+        text = " ".join(args.text)
+        if args.no_play:
+            print("\n".join(str(w) for w in v.synth(text)))
+        elif not v.speak(text):
+            raise SystemExit("could not speak (space down? no audio sink?) — see log")
     elif args.cmd == "runs":
         if args.run_id:
             r = store.run(args.run_id)

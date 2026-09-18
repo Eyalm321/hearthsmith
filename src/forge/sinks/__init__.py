@@ -8,7 +8,9 @@ import time
 from pathlib import Path
 
 from forge.adapters.hyperpanes import Hyperpanes
+from forge.config import VoiceCfg
 from forge.store import Task
+from forge.voice import Voice
 
 
 class NotifySink:
@@ -47,6 +49,22 @@ class HyperpanesSink:
             target = next((p for p in snap.panes if p.activity == "busy"), snap.panes[0])
         try:
             return self.hp.message(target.id, text)
+        except Exception:  # noqa: BLE001 — delivery must never take the daemon down
+            return False
+
+
+class VoiceSink:
+    """He says it out loud, in the cloned dwarf voice. Additive: the text still goes to the
+    sprite/pane, sound is on top — so it never counts as the only delivery."""
+
+    name = "voice"
+
+    def __init__(self, cfg: VoiceCfg):
+        self.voice = Voice(cfg)
+
+    def send(self, text: str, urgency: str, task: Task | None) -> bool:
+        try:
+            return self.voice.speak(text)
         except Exception:  # noqa: BLE001 — delivery must never take the daemon down
             return False
 
