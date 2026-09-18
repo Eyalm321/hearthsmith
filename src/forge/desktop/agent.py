@@ -74,14 +74,23 @@ def _jev(cfg: config.DecideCfg, state, questions: dict) -> dict:
     return r.json()["answers"]
 
 
+# "go to google" is a site; "open Downloads" is a folder. Only bare names we actually know
+# become URLs — everything else needs a dot or falls through to a search.
+KNOWN_SITES = {"google": "google.com", "youtube": "youtube.com", "github": "github.com",
+               "reddit": "reddit.com", "wikipedia": "wikipedia.org", "amazon": "amazon.com",
+               "openrouter": "openrouter.ai", "huggingface": "huggingface.co", "x": "x.com",
+               "twitter": "x.com", "gmail": "mail.google.com", "claude": "claude.ai",
+               "openai": "openai.com", "anthropic": "anthropic.com", "hackernews": "news.ycombinator.com"}
+
+
 def _goal_url(goal: str) -> str | None:
     if m := URL_RE.search(goal):
         u = m.group(1)
         return u if u.startswith("http") else "https://" + u
     if m := SITE_RE.search(goal):
         name = m.group(1).lower()
-        if name not in APPS:
-            return f"https://www.{name}.com"
+        if name in KNOWN_SITES and name not in APPS:
+            return f"https://{KNOWN_SITES[name]}"
     return None
 
 
@@ -101,18 +110,30 @@ def _fill_value(cfg: config.Config, goal: str, field_desc: str) -> str:
 
 
 SEARCH_RE = re.compile(r"\bsearch(?:\s+\w+)?\s+for\s+(.+)$", re.IGNORECASE)
+STOPWORDS = re.compile(r"^\s*(?:please\s+)?(?:can you\s+)?(?:show me|find me|find|look up|"
+                       r"search for|search|open|go to|navigate to|visit|pull up|bring up)\s+",
+                       re.IGNORECASE)
+WEBBY = re.compile(r"\b(show me|find|look up|search|open|browse|website|page|docs?|on \w+)\b",
+                   re.IGNORECASE)
 
 
-def _navigate_url(goal: str) -> str | None:
-    """A URL the goal implies. Beats typing in the address bar: no keyboard, no submit guessing,
-    and the browser does the navigating."""
+def _navigate_url(goal: str, cfg: config.Config | None = None) -> str | None:
+    """A destination for the goal. Order: an address in the text, a quoted/explicit search, then
+    — rather than fall back to typing in the address bar and guessing what submits it — a plain
+    web search for what was asked. Getting to a results page is always progress; typing blind
+    isn't."""
+    from urllib.parse import quote_plus
     if u := _goal_url(goal):
         return u
-    m = SEARCH_RE.search(goal) or QUOTED.search(goal)
-    if m:
-        from urllib.parse import quote_plus
+    if m := (SEARCH_RE.search(goal) or QUOTED.search(goal)):
         q = m.group(1).strip().strip("'\"“”‘’")
         return f"https://www.google.com/search?q={quote_plus(q)}"
+    names_local_app = any(re.search(rf"\b{re.escape(n)}\b", goal.lower()) for n in APPS
+                          if n not in ("chrome", "firefox"))
+    if WEBBY.search(goal) and not names_local_app:
+        q = STOPWORDS.sub("", goal).strip(" .?!")
+        if q:
+            return f"https://www.google.com/search?q={quote_plus(q)}"
     return None
 
 
@@ -199,7 +220,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                      "windows_on_screen_without_accessibility": opaque[:12],
                      "steps_so_far": res.steps[-6:],
                      "elements": {str(e.i): e.desc() for e in els}}
-            nav_url = _navigate_url(goal)
+            nav_url = _navigate_url(goal, cfg)
             state["navigate_would_open"] = nav_url or "(no address in the goal)"
             a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win, nav_url))
             op = a["operation"]["choice"] if "operation" in a else "stuck"
