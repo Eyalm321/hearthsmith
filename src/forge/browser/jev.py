@@ -8,6 +8,11 @@ from dataclasses import dataclass, field
 
 from forge import config
 
+# Nothing here is solvable by an agent: park the tab and hand it over.
+GATES = ("verify you are human", "i'm not a robot", "complete the captcha", "captcha",
+         "unusual traffic", "enter the code we sent", "verification code sent",
+         "two-factor", "confirm your identity", "solve this puzzle")
+
 
 @dataclass
 class Result:
@@ -48,6 +53,29 @@ def _patch(cfg: config.Config) -> None:
 
         jm.post_json = post_json
         jm._forge_patched = True
+
+    if not getattr(jm, "_forge_asks", False):
+        upstream_text = jm.field_text
+
+        def field_text(context):
+            """A password is not a field to be guessed: an invented one hands back an account
+            whose credentials exist nowhere. Those go to the user, and the answer is typed
+            without passing through any log, trace or decision payload."""
+            from forge import ask as asker
+            field = (context or {}).get("field") or {}
+            label = " ".join(str(field.get(k) or "") for k in ("label", "role"))
+            kind = asker.sensitive(label)
+            if kind:
+                what = field.get("label") or "this field"
+                site = ((context or {}).get("page") or {}).get("title", "")
+                answer = asker.ask(f"{what}\n\n{site}".strip(), secret=kind == "secret")
+                if answer:
+                    return {"text": answer, "model": "you", "sensitive": True}
+                raise ValueError(f"{what}: needs you — nothing was typed")
+            return upstream_text(context)
+
+        jm.field_text = field_text
+        jm._forge_asks = True
 
     if not getattr(jb, "_forge_patched", False):
         upstream_cdp = jb.cdp
@@ -155,7 +183,9 @@ def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
                 for h in state.get("history", [])[len(res.steps):]:
                     line = f"{h.get('kind', '?')} {h.get('action', '')}".strip()
                     if h.get("text"):
-                        line += f" = {h['text']!r}"
+                        from forge.ask import sensitive
+                        line += (" = (from you)" if sensitive(str(h.get("action", "")))
+                                 else f" = {h['text']!r}")
                     p = h.get("probability")
                     lat = h.get("latency_ms")
                     if p is not None and lat is not None:
@@ -167,6 +197,12 @@ def run(goal: str, url: str | None = None, cfg: config.Config | None = None,
                 page = state.get("page") or {}
                 res.url = page.get("url") or state.get("url") or res.url
                 res.title = page.get("title") or state.get("title") or res.title
+                page_txt = (page.get("text") or "").lower()[:4000]
+                if any(g in page_txt for g in GATES):
+                    res.note = "your turn — it needs a human (captcha / verification)"
+                    say.failed("Your turn: it needs a human check. Say 'continue' when done.")
+                    _keep_tab[0] = True      # leave it exactly where you have to take over
+                    break
                 status = state.get("status", "")
                 if status in ("done", "blocked", "error"):
                     res.ok = status == "done"

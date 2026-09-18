@@ -79,3 +79,28 @@ def test_speculative_heads_scope_targets():
     q2 = _questions([el(0, "entry", "Search", True)], [win], win)
     assert "click_target" not in q2               # nothing clickable → no click head
     assert "click" not in q2["operation"].criteria
+
+
+def test_sensitive_fields_are_never_guessed():
+    from forge.ask import sensitive
+    assert sensitive("Password") == "secret"
+    assert sensitive("Confirm password") == "secret"
+    assert sensitive("Verification code") == "secret"
+    assert sensitive("Username") == "yours"
+    assert sensitive("Email address") == "yours"
+    assert sensitive("Where from?") is None
+    assert sensitive("Search") is None
+
+
+def test_desktop_refuses_to_invent_a_password(monkeypatch, tmp_path):
+    from forge import ask as asker
+    from forge import config as c
+    from forge.desktop.agent import _fill_value
+    monkeypatch.setattr(asker, "ask", lambda *a, **k: None)      # user cancels
+    cfg = c.Config(db_path=tmp_path / "t.db")
+    try:
+        _fill_value(cfg, "sign up for an account", "entry: Password [text field]")
+    except PermissionError as e:
+        assert "needs you" in str(e)
+    else:
+        raise AssertionError("a password must never be generated")

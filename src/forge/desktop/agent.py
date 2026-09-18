@@ -126,6 +126,12 @@ def _fill_value(cfg: config.Config, goal: str, field_desc: str, filled: dict | N
     bar, a date for a date field; otherwise a small model writes the value — and it is told what
     has already been entered, or it happily puts the origin city in the departure date."""
     filled = filled or {}
+    from forge import ask as asker
+    if kind := asker.sensitive(field_desc):
+        answer = asker.ask(field_desc, secret=kind == "secret")
+        if answer:
+            return answer
+        raise PermissionError(f"{field_desc}: needs you")
     low = field_desc.lower()
     if ("address" in low or "url" in low or "location" in low) and (u := _goal_url(goal)):
         return u
@@ -520,9 +526,15 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                     stale_retries = 0
 
                 if op == "type":
-                    val = _fill_value(cfg, goal, tgt.desc(), filled)
-                    filled[tgt.name or tgt.role] = val
-                    step = f"type into '{tgt.desc()}': {val!r}"
+                    try:
+                        val = _fill_value(cfg, goal, tgt.desc(), filled)
+                    except PermissionError as e:
+                        res.note = str(e)
+                        return res
+                    secret = bool(__import__("forge.ask", fromlist=["x"]).sensitive(tgt.desc()))
+                    filled[tgt.name or tgt.role] = "(from you)" if secret else val
+                    step = (f"type into '{tgt.desc()}': (from you)" if secret
+                            else f"type into '{tgt.desc()}': {val!r}")
                     if not dry:
                         # A combobox/autocomplete on a modern page discards programmatic text:
                         # AT-SPI reports success, the value looks right for a moment, then the
