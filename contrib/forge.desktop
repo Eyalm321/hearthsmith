@@ -8,7 +8,7 @@ Terminal=false
 Categories=Utility;
 Keywords=tasks;nag;pet;
 StartupNotify=false
-Actions=show;hide;heartbeat;
+Actions=show;hide;unlock;heartbeat;
 
 [Desktop Action show]
 Name=Show blacksmith
@@ -17,6 +17,10 @@ Exec=forge-sprite start
 [Desktop Action hide]
 Name=Hide blacksmith
 Exec=forge-sprite stop
+
+[Desktop Action unlock]
+Name=Move / resize
+Exec=forge-sprite unlock
 
 [Desktop Action heartbeat]
 Name=Nag me now
