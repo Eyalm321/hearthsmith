@@ -56,6 +56,13 @@ def _rgb(hexs: str) -> tuple[float, float, float]:
     return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
 
 
+def _workarea_at(widget: Gtk.Widget, x: int, y: int):
+    """Workarea of the monitor holding (x, y). He can live on any screen; the bubble and the
+    prompt go where he is, not to the primary."""
+    d = widget.get_screen().get_display()
+    return d.get_monitor_at_point(x, y).get_workarea()
+
+
 def load_avatar_cfg() -> dict:
     if AVATAR_CFG.exists():
         return yaml.safe_load(AVATAR_CFG.read_text()) or {}
@@ -141,7 +148,7 @@ class Bubble(Gtk.Window):
                 GLib.timeout_add(80, self._type)
         U, P, T = self.U, self.PAD, self.TAIL
         sx, sy, sw, sh = anchor
-        mon = self.get_screen().get_display().get_primary_monitor().get_workarea()
+        mon = _workarea_at(self, sx + sw // 2, sy + sh // 2)
         surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1)
         cr = cairo.Context(surf)
         _, ext = self._layout(cr, (self.COLS - 2 * P - 2) * U, text).get_pixel_extents()
@@ -527,7 +534,9 @@ class Sprite(Gtk.Window):
         entry.set_width_chars(60)
         box.pack_start(entry, True, True, 0)
         w.add(box)
-        mon = w.get_screen().get_display().get_primary_monitor().get_workarea()
+        x, y = self.get_position()
+        sw, sh = self.sprite_size()
+        mon = _workarea_at(w, x + sw // 2, y + sh // 2)
         pw = 640
         w.set_default_size(pw, -1)
         w.move(mon.x + (mon.width - pw) // 2, mon.y + int(mon.height * self.cfg.get("prompt_y", 0.22)))
