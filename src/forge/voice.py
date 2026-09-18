@@ -1,12 +1,11 @@
-"""His voice. Zero-shot clone: AuK hears the reference clip and says the text in that voice.
-Nothing is trained, nothing is stored but wavs — the clip in assets/voice IS the voice.
+"""His voice. Zero-shot clone: the engine hears the reference clip and says the text in that
+voice. Nothing is trained, nothing is stored but wavs — the clip in assets/voice IS the voice.
 
-synth(text) -> [wav paths]  (cached by text+clip, so repeated lines cost nothing)
+synth(text) -> [wav paths]  (cached by text+clip+engine, so repeated lines cost nothing)
 speak(text) -> bool         (synth, then play through PipeWire; never raises)
 
-Two engines, same clip: AuK on the HF space is the voice we want; the free ZeroGPU quota runs
-out after a handful of lines, so the local Chatterbox server (~/dev/voice-clone) takes over
-until it comes back. Both are zero-shot from the same wav, so he stays the same dwarf.
+Engines (see VoiceCfg.engines): AuK on the HF space when its quota allows, the local Qwen3-TTS
+server otherwise. Same clip into both, so he stays the same dwarf either way.
 """
 
 from __future__ import annotations
@@ -19,13 +18,15 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import httpx
+
 from forge.config import VoiceCfg
 
 log = logging.getLogger("forge.voice")
 
 # the space's zero-shot TTS template; other tasks (edit, denoise) use other phrasings
-INSTRUCTION = 'Say the following with the same voice: "{text}"'
-API = "/run_generate_with_pe"
+AUK_INSTRUCTION = 'Say the following with the same voice: "{text}"'
+AUK_API = "/run_generate_with_pe"
 _SENT = re.compile(r"(?<=[.!?…])\s+")
 
 
@@ -53,97 +54,84 @@ def seconds_for(text: str, wps: float, max_s: float) -> float:
 class Voice:
     def __init__(self, cfg: VoiceCfg):
         self.cfg = cfg
-        self._client = None
-        self._fb_client = None
-        self.engine = "auk"  # what actually spoke last; "chatterbox" once AuK refused
+        self._auk_client = None
+        self.engines = list(cfg.engines)  # shrinks as engines refuse; empty = he's mute this run
 
     def available(self) -> bool:
-        return self.cfg.enabled and self.cfg.ref.exists()
+        return self.cfg.enabled and self.cfg.ref.exists() and bool(self.engines)
 
-    def _key(self, text: str, engine: str = "auk") -> str:
+    def _key(self, text: str, engine: str) -> str:
         h = hashlib.sha1()
         h.update(self.cfg.ref.read_bytes())
-        tag = self.cfg.variant if engine == "auk" else engine
-        h.update(f"|{tag}|{self.cfg.seed}|{text}".encode())
+        tag = f"auk:{self.cfg.variant}:{self.cfg.seed}" if engine == "auk" else engine
+        h.update(f"|{tag}|{text}".encode())
         return h.hexdigest()[:20]
 
-    def _fallback(self):
-        if self._fb_client is None and self.cfg.fallback_url:
-            from gradio_client import Client
+    # -- engines -------------------------------------------------------------------------------
 
-            self._fb_client = Client(self.cfg.fallback_url, verbose=False,
-                                     download_files=str(self.cfg.cache_dir), analytics_enabled=False)
-        return self._fb_client
+    def _auk(self, part: str, out: Path) -> None:
+        from gradio_client import Client, handle_file
+        from huggingface_hub import get_token
 
-    def _connect(self):
-        if self._client is None:
-            from gradio_client import Client  # slow import; only when he actually speaks
-            from huggingface_hub import get_token
-
+        if self._auk_client is None:
             # env first, then `hf auth login`'s cache: anonymous ZeroGPU runs out after ~3 lines
             token = os.environ.get(self.cfg.hf_token_env) or get_token() or None
-            self._client = Client(self.cfg.space, token=token, verbose=False,
-                                  download_files=str(self.cfg.cache_dir), analytics_enabled=False)
-        return self._client
-
-    def synth(self, text: str) -> list[Path]:
-        """One wav per chunk, in order. Empty list = could not synthesize."""
-        self.cfg.cache_dir.mkdir(parents=True, exist_ok=True)
-        wavs = []
-        for part in chunk(text, self.cfg.words_per_second, self.cfg.max_chunk_seconds):
-            out = self.cfg.cache_dir / f"{self._key(part)}.wav"
-            if out.exists():
-                wavs.append(out)
-                continue
-            if self.engine == "auk":
-                try:
-                    self._store(self._auk(part), out)
-                    wavs.append(out)
-                    continue
-                except Exception as e:  # quota, queue, space asleep: all mean "not now"
-                    if not self.cfg.fallback_url:
-                        raise
-                    log.warning("voice: AuK refused (%s); falling back to chatterbox", str(e)[:120])
-                    self.engine = "chatterbox"
-            out = self.cfg.cache_dir / f"{self._key(part, 'chatterbox')}.wav"
-            if not out.exists():
-                self._store(self._chatterbox(part), out)
-            wavs.append(out)
-        return wavs
-
-    def _auk(self, part: str) -> str:
-        from gradio_client import handle_file
-
-        return self._connect().predict(
+            self._auk_client = Client(self.cfg.space, token=token, verbose=False,
+                                      download_files=str(self.cfg.cache_dir),
+                                      analytics_enabled=False)
+        got = self._auk_client.predict(
             use_pe=False,
             variant=self.cfg.variant,
             audio=handle_file(str(self.cfg.ref)),
-            instruction=INSTRUCTION.format(text=part),
+            instruction=AUK_INSTRUCTION.format(text=part),
             gen_seconds=seconds_for(part, self.cfg.words_per_second, self.cfg.max_chunk_seconds),
             nfe=32, cfg=2.0, seed=self.cfg.seed,
-            api_name=API,
+            api_name=AUK_API,
         )
-
-    def _chatterbox(self, part: str) -> str:
-        from gradio_client import handle_file
-
-        return self._fallback().predict(
-            text=part, ref_override=handle_file(str(self.cfg.ref)),
-            exaggeration=self.cfg.fallback_exaggeration, cfg_weight=self.cfg.fallback_cfg_weight,
-            api_name="/ui_synth",
-        )
-
-    @staticmethod
-    def _store(got: str, out: Path) -> None:
         shutil.move(got, out)
         shutil.rmtree(Path(got).parent, ignore_errors=True)  # gradio's per-call dir
+
+    def _qwen(self, part: str, out: Path) -> None:
+        r = httpx.post(f"{self.cfg.qwen_url}/api/tts", timeout=self.cfg.timeout_seconds,
+                       json={"text": part, "ref": str(self.cfg.ref),
+                             "ref_text": self.cfg.ref_text.read_text().strip(),
+                             "language": self.cfg.qwen_language})
+        r.raise_for_status()
+        out.write_bytes(r.content)
+
+    # -- pipeline ------------------------------------------------------------------------------
+
+    def synth(self, text: str) -> list[Path]:
+        """One wav per chunk, in order. Raises when every engine refused."""
+        self.cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+        return [self._one(part) for part in
+                chunk(text, self.cfg.words_per_second, self.cfg.max_chunk_seconds)]
+
+    def _one(self, part: str) -> Path:
+        # a line any engine already said is good enough; don't spend a call to say it again
+        for eng in self.engines:
+            out = self.cfg.cache_dir / f"{self._key(part, eng)}.wav"
+            if out.exists():
+                return out
+        last: Exception | None = None
+        while self.engines:
+            eng = self.engines[0]
+            out = self.cfg.cache_dir / f"{self._key(part, eng)}.wav"
+            try:
+                getattr(self, f"_{eng}")(part, out)
+                return out
+            except Exception as e:  # noqa: BLE001 — quota, queue, server down: "not this one, not now"
+                last = e
+                log.warning("voice: %s refused (%s)", eng, str(e)[:120])
+                self.engines.pop(0)
+        raise RuntimeError(f"no engine could speak: {last}")
 
     def speak(self, text: str) -> bool:
         if not self.available():
             return False
         try:
             wavs = self.synth(text)
-        except Exception as e:  # noqa: BLE001 — the space is down or queued out; nag goes on without sound
+        except Exception as e:  # noqa: BLE001 — nag goes on without sound
             log.warning("voice: synth failed: %s", e)
             return False
         return bool(wavs) and all(play(w, self.cfg.timeout_seconds, self.cfg.sink) for w in wavs)

@@ -93,17 +93,24 @@ busy agent is only interrupted when it really is the same thread of work.
 
 ## Voice
 
-He sounds like a dwarf. `assets/voice/dwarf.wav` is 16s of WoW dwarf NPC lines;
-[AuK](https://github.com/Tencent-Hunyuan/AuK) (Tencent, MIT) clones it zero-shot per line, so the
-clip *is* the voice — drop in another wav (`voice.ref`) and he is someone else. The model wants
-~17 GiB, so synthesis runs on the [HF space](https://huggingface.co/spaces/tencent/AuK) via
-`gradio_client` (~20s a line, cached forever by text+clip under `~/.local/state/forge/voice/`);
-`voice.space` takes a self-hosted Gradio URL when a big enough card shows up. Anonymous ZeroGPU
-quota lasts about three lines — `hf auth login` once (or `HF_TOKEN` in `~/.config/forge/env`).
-Playback is `pw-play`, blocking, because `forged` is a oneshot unit.
+He sounds like a dwarf. `assets/voice/dwarf.wav` is 16s of WoW dwarf NPC lines (`dwarf.txt` its
+transcript); a zero-shot cloner says each line in that voice, so the clip *is* the voice — drop
+in another wav (`voice.ref` + `voice.ref_text`) and he is someone else. Two engines, tried in
+order (`voice.engines`), same clip into both:
+
+- **auk** — [AuK](https://github.com/Tencent-Hunyuan/AuK) (Tencent, MIT) on the
+  [HF space](https://huggingface.co/spaces/tencent/AuK) via `gradio_client`. Best clone. Wants
+  ~17 GiB so it can't run here, and free ZeroGPU quota is ~8 lines/day (`hf auth login` helps;
+  PRO gives 40 min/day).
+- **qwen** — Qwen3-TTS-0.6B-Base (Apache-2.0), warm server in `~/dev/forge-voice`
+  (`forge-voice.service`, :7861). fp32 on the 2080 Ti — fp16 NaNs on Turing — ~4 GiB resident,
+  ~6s a line, unloads after 15 min idle. Unlimited.
+
+Wavs are cached by text+clip+engine under `~/.local/state/forge/voice/`. Playback is `pw-play`
+to the default sink, blocking, because `forged` is a oneshot unit.
 
 ```sh
-forge speak "Oi. That ledger's got rust on it."   # hear him; --no-play prints the wav path
+forge speak "Oi. That ledger's got rust on it."   # hear him; --no-play prints the wav paths
 ```
 
 ## Two bodies, one brain

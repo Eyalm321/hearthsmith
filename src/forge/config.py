@@ -86,30 +86,35 @@ class NagCfg:
 
 @dataclass
 class VoiceCfg:
-    """How he sounds. AuK (Tencent) clones the voice zero-shot from one reference clip, so the
-    voice IS the clip: swap `ref` and he speaks like someone else. The model wants ~17 GiB, more
-    than any card here, so it runs on the HF space; `space` can point at a self-hosted Gradio
-    (`http://host:7860`) later without touching code."""
+    """How he sounds. Zero-shot clone from one reference clip, so the voice IS the clip: swap
+    `ref` (and its transcript `ref_text`) and he speaks like someone else.
+
+    Engines, tried in order until one speaks; the first refusal in a process sticks so a dead
+    engine costs one failed call, not one per line:
+      auk   Tencent AuK on the HF space (gradio_client). Best clone; wants ~17 GiB so it can't
+            run here, and free ZeroGPU quota is ~8 lines/day.
+      qwen  Qwen3-TTS-0.6B-Base on this box, warm server at `qwen_url` (~/dev/forge-voice,
+            forge-voice.service). fp32 on the 2080 Ti, ~6s a line, unlimited."""
     enabled: bool = True
-    space: str = "tencent/AuK"
+    engines: list[str] = field(default_factory=lambda: ["auk", "qwen"])
     # WoW dwarf NPC lines, 16s. A gruff blacksmith should sound like one.
     ref: Path = Path(__file__).resolve().parent.parent.parent / "assets/voice/dwarf.wav"
+    ref_text: Path = Path(__file__).resolve().parent.parent.parent / "assets/voice/dwarf.txt"
+    # auk
+    space: str = "tencent/AuK"
     variant: str = "AuK (Base)"  # or "AuK-Flash ⚡": 4 steps, faster, rougher
     seed: int = 42
+    hf_token_env: str = "HF_TOKEN"  # optional; anonymous ZeroGPU quota is small
     # he talks at dwarf pace; the space needs to be told how long the clip is
     words_per_second: float = 2.6
     max_chunk_seconds: float = 14.0
+    # qwen
+    qwen_url: str = "http://127.0.0.1:7861"
+    qwen_language: str = "English"
     timeout_seconds: int = 150  # space queue + ~20s synth; heartbeat has 300
-    # PipeWire sink name (`pactl list sinks short`); "" = default, which on this box is the
-    # motherboard line-out nobody listens to
+    # PipeWire sink name (`pactl list sinks short`); "" = default output
     sink: str = ""
     cache_dir: Path = STATE_DIR / "voice"
-    hf_token_env: str = "HF_TOKEN"  # optional; anonymous ZeroGPU quota is small
-    # when the space refuses (free ZeroGPU lasts ~8 lines/day): the local Chatterbox server,
-    # same clip, rougher clone but on this box. "" = no fallback, he stays quiet.
-    fallback_url: str = "http://192.168.0.91:7860/"
-    fallback_exaggeration: float = 0.5
-    fallback_cfg_weight: float = 0.5
 
 
 @dataclass
