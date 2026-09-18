@@ -9,6 +9,7 @@ Type=simple
 ExecStart=/usr/bin/python3 -m forge.sprite.renderer --corner bottom-right
 Environment=PYTHONPATH=%h/dev/forge/src
 Environment=GDK_BACKEND=x11
+Environment=PYTHONUNBUFFERED=1
 Environment=DISPLAY=:0
 Slice=app-graphical.slice
 Restart=on-failure

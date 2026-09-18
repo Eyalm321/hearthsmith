@@ -26,6 +26,8 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("PangoCairo", "1.0")
+import logging
+
 import cairo
 import yaml
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango, PangoCairo
@@ -35,6 +37,7 @@ from forge.sprite import pack as packmod
 from forge.sprite import procedural
 from forge.sprite.procedural import AVATAR_CFG
 
+log = logging.getLogger("forge.sprite")
 BUBBLE_W = 300
 ALIVE_FILE = STATE_DIR / "sprite.alive"
 
@@ -548,6 +551,16 @@ class Sprite(Gtk.Window):
     # -- animation -----------------------------------------------------------------------------
 
     def _tick(self) -> bool:
+        # One uncaught exception here removes the GLib source and he is frozen mid-frame for the
+        # rest of the session — which is exactly how he got stuck holding a hammer. Nothing in
+        # the loop is worth dying for: log it and keep ticking.
+        try:
+            self._tick_once()
+        except Exception:
+            log.exception("tick failed")
+        return True
+
+    def _tick_once(self) -> None:
         self._apply_cfg()
         try:
             m = self.state_file.stat().st_mtime
@@ -588,7 +601,6 @@ class Sprite(Gtk.Window):
             except OSError:
                 pass
         self.area.queue_draw()
-        return True
 
     # -- drawing -------------------------------------------------------------------------------
 
@@ -602,7 +614,11 @@ class Sprite(Gtk.Window):
         if self.pack:
             frames = self.pack.frames(self.state)
             if frames:
-                self._blit(cr, frames[self.frame % len(frames)], 0, oy, sw)
+                # Shouting art differs between frames by a few pixels (an "!" over his head), so
+                # the pose reads as frozen. A small shake makes the state legible whatever the
+                # pack's frames look like.
+                jolt = round(sw * 0.012) * (1 if self.frame % 2 else -1) if self.state == "alert" else 0
+                self._blit(cr, frames[self.frame % len(frames)], jolt, oy, sw)
         else:
             s = self.scale
             for y, row in enumerate(procedural.composite(self.state, self.frame)):
@@ -639,6 +655,7 @@ def _add_fonts() -> None:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     _add_fonts()
     ap = argparse.ArgumentParser(prog="forge-sprite")
     ap.add_argument("--scale", type=float, help="default size multiplier (avatar.yaml wins)")

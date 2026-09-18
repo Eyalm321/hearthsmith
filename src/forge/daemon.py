@@ -75,7 +75,9 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
     d: Decision = decide(cfg.decide, state, tasks, last, cfg.nag.min_gap_minutes)
     log.info("decision %s", d.as_json())
     if not force and (d.should_nag < 0.5 or d.task_id is None):
-        sprite.write("idle" if d.urgency == "ignorable" else "forge", urgency=d.urgency)
+        # He works the forge when he has something to say. Using it as an ambient mood for
+        # "there is pending work" left him hammering at nothing until the next heartbeat.
+        sprite.write("idle", urgency=d.urgency)
         return {"skipped": "not_now", "decision": json.loads(d.as_json())}
     if d.task_id is None:
         if not tasks:
