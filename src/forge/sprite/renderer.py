@@ -574,8 +574,10 @@ class Sprite(Gtk.Window):
 
         def run():
             try:
-                subprocess.run([str(Path.home() / "dev/forge/.venv/bin/forge"), "speak", text],
-                               capture_output=True, timeout=180, check=False)
+                out = subprocess.run([str(Path.home() / "dev/forge/.venv/bin/forge"), "speak", text],
+                                     capture_output=True, text=True, timeout=180, check=False)
+                if out.returncode:
+                    log.warning("speak exited %d: %s", out.returncode, out.stderr.strip()[-300:])
             except Exception:  # no voice is not worth a frozen avatar
                 log.exception("speak failed")
         threading.Thread(target=run, daemon=True).start()
