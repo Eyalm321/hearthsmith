@@ -174,8 +174,12 @@ NOISE = re.compile(r"\b(?:go to|open|show me|find|look up|visit|navigate to|the|
 SIGNUP = {"proton.me": "https://account.proton.me/signup",
           "fastmail.com": "https://www.fastmail.com/signup/",
           "github.com": "https://github.com/signup"}
-SIGNUP_RE = re.compile(r"\b(register|sign ?up|create (?:a |an )?(?:new )?account|"
-                       r"new (?:email )?(?:address|account))\b", re.IGNORECASE)
+SIGNUP_RE = re.compile(
+    # people type "adress", and "make me an account" is the same request as "register"
+    r"\b(register|sign ?up|signup|"
+    r"(?:create|make|open|set ?up|get) (?:me )?(?:a |an )?(?:new )?(?:email |e-?mail )?"
+    r"(?:acc?ount|add?ress|inbox|mailbox)|"
+    r"new (?:email |e-?mail )?(?:add?ress|acc?ount))\b", re.IGNORECASE)
 
 
 def _leftover(goal: str, domain: str) -> str:
