@@ -1,0 +1,160 @@
+"""The task store. SQLite, one table, the pet owns it. Harnesses are clients via forge-mcp."""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+import uuid
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS tasks (
+  id          TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  state       TEXT NOT NULL DEFAULT 'open',   -- open | done | blocked | delegated
+  due         INTEGER,                        -- epoch seconds, nullable
+  project     TEXT,                           -- hyperpanes project id or free text
+  source      TEXT NOT NULL DEFAULT 'forge',  -- forge | markdown | dsh | github | ...
+  source_id   TEXT,
+  tags        TEXT NOT NULL DEFAULT '',       -- comma-separated
+  notes       TEXT NOT NULL DEFAULT '',
+  snoozed_until INTEGER,
+  nag_count   INTEGER NOT NULL DEFAULT 0,
+  last_nag_at INTEGER,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_source ON tasks(source, source_id) WHERE source_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS nags (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  at        INTEGER NOT NULL,
+  task_id   TEXT,
+  channel   TEXT NOT NULL,
+  urgency   TEXT NOT NULL,
+  text      TEXT NOT NULL,
+  decision  TEXT NOT NULL                     -- json blob of the Jev/adapter answers
+);
+CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+"""
+
+
+@dataclass
+class Task:
+    id: str
+    title: str
+    state: str = "open"
+    due: int | None = None
+    project: str | None = None
+    source: str = "forge"
+    source_id: str | None = None
+    tags: str = ""
+    notes: str = ""
+    snoozed_until: int | None = None
+    nag_count: int = 0
+    last_nag_at: int | None = None
+    created_at: int = 0
+    updated_at: int = 0
+
+    @property
+    def overdue(self) -> bool:
+        return self.due is not None and self.due < time.time() and self.state == "open"
+
+    @property
+    def snoozed(self) -> bool:
+        return self.snoozed_until is not None and self.snoozed_until > time.time()
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+class Store:
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(self.path, isolation_level=None)
+        self.db.row_factory = sqlite3.Row
+        self.db.executescript(SCHEMA)
+
+    # -- tasks -----------------------------------------------------------------------------
+
+    def add(self, title: str, *, due: int | None = None, project: str | None = None,
+            source: str = "forge", source_id: str | None = None, tags: str = "",
+            notes: str = "") -> Task:
+        now = int(time.time())
+        t = Task(id=uuid.uuid4().hex[:12], title=title, due=due, project=project, source=source,
+                 source_id=source_id, tags=tags, notes=notes, created_at=now, updated_at=now)
+        self.db.execute(
+            "INSERT INTO tasks (id,title,state,due,project,source,source_id,tags,notes,"
+            "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (t.id, t.title, t.state, t.due, t.project, t.source, t.source_id, t.tags, t.notes,
+             t.created_at, t.updated_at))
+        return t
+
+    def upsert_external(self, source: str, source_id: str, title: str, **kw) -> Task:
+        """One-way import: external source wins on title/due, forge keeps its own nag state."""
+        row = self.db.execute("SELECT * FROM tasks WHERE source=? AND source_id=?",
+                              (source, source_id)).fetchone()
+        if row is None:
+            return self.add(title, source=source, source_id=source_id, **kw)
+        self.db.execute("UPDATE tasks SET title=?, due=?, project=COALESCE(?,project), updated_at=? "
+                        "WHERE id=?", (title, kw.get("due"), kw.get("project"), int(time.time()),
+                                       row["id"]))
+        return self.get(row["id"])
+
+    def get(self, task_id: str) -> Task | None:
+        row = self.db.execute("SELECT * FROM tasks WHERE id=? OR id LIKE ?",
+                              (task_id, task_id + "%")).fetchone()
+        return Task(**dict(row)) if row else None
+
+    def list(self, state: str | None = "open", project: str | None = None) -> list[Task]:
+        q, args = "SELECT * FROM tasks", []
+        conds = []
+        if state:
+            conds.append("state=?"); args.append(state)
+        if project:
+            conds.append("project=?"); args.append(project)
+        if conds:
+            q += " WHERE " + " AND ".join(conds)
+        q += " ORDER BY COALESCE(due, 1e12), created_at"
+        return [Task(**dict(r)) for r in self.db.execute(q, args)]
+
+    def set_state(self, task_id: str, state: str) -> Task | None:
+        self.db.execute("UPDATE tasks SET state=?, updated_at=? WHERE id=?",
+                        (state, int(time.time()), task_id))
+        return self.get(task_id)
+
+    def snooze(self, task_id: str, minutes: int) -> Task | None:
+        until = int(time.time()) + minutes * 60
+        self.db.execute("UPDATE tasks SET snoozed_until=?, updated_at=? WHERE id=?",
+                        (until, int(time.time()), task_id))
+        return self.get(task_id)
+
+    def mark_nagged(self, task_id: str | None) -> None:
+        if task_id:
+            self.db.execute("UPDATE tasks SET nag_count=nag_count+1, last_nag_at=? WHERE id=?",
+                            (int(time.time()), task_id))
+
+    # -- nag log + kv ----------------------------------------------------------------------
+
+    def log_nag(self, task_id: str | None, channel: str, urgency: str, text: str,
+                decision: str) -> None:
+        self.db.execute("INSERT INTO nags (at,task_id,channel,urgency,text,decision) "
+                        "VALUES (?,?,?,?,?,?)",
+                        (int(time.time()), task_id, channel, urgency, text, decision))
+
+    def last_nag_at(self) -> int | None:
+        row = self.db.execute("SELECT MAX(at) AS at FROM nags").fetchone()
+        return row["at"]
+
+    def recent_nags(self, n: int = 5) -> list[dict]:
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM nags ORDER BY at DESC LIMIT ?", (n,))]
+
+    def kv_get(self, k: str, default: str | None = None) -> str | None:
+        row = self.db.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
+        return row["v"] if row else default
+
+    def kv_set(self, k: str, v: str) -> None:
+        self.db.execute("INSERT INTO kv (k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                        (k, v))
