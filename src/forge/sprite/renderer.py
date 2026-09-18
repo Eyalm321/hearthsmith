@@ -281,7 +281,7 @@ class Sprite(Gtk.Window):
         mon = w.get_screen().get_display().get_primary_monitor().get_workarea()
         pw = 640
         w.set_default_size(pw, -1)
-        w.move(mon.x + (mon.width - pw) // 2, mon.y + 48)
+        w.move(mon.x + (mon.width - pw) // 2, mon.y + int(mon.height * self.cfg.get("prompt_y", 0.22)))
         entry.connect("activate", lambda e: self._submit(e.get_text()))
         w.connect("key-press-event",
                   lambda _w, ev: self._close_prompt() if ev.keyval == Gdk.KEY_Escape else False)
