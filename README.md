@@ -69,3 +69,4 @@ Delegation enqueues to `hyperpanes.delegate_queue` (default `forge`); drain it w
 Not built yet. The daemon writes `sprite.json` (`state ∈ idle | forge | alert | sleep`, `text`,
 `urgency`); the renderer is a separate process. Plan: layered spritesheets + palette LUT so the
 blacksmith is customizable without new art.
+- `.agent-browser/` — the smith's own browser profile (forge-browser.service, :4835). Login once via `AB_PORT=4835 node ~/dev/agent-browser/src/cli.ts daemon --headed` from your terminal if a site needs it.

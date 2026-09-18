@@ -1,0 +1,19 @@
+[Unit]
+Description=forge: agent-browser daemon the smith drives (headless Chromium, own profile)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dev/forge
+Environment=AB_PORT=4835
+Environment=AB_BASE_URL=https://www.google.com
+Environment=PATH=%h/.local/share/fnm/aliases/default/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node %h/dev/agent-browser/src/cli.ts daemon
+Slice=app-graphical.slice
+MemoryMax=2G
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

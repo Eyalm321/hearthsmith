@@ -34,6 +34,7 @@ def main() -> None:
     sub.add_parser("nags")
     mu = sub.add_parser("mute", help="stop all nagging for a while"); mu.add_argument("minutes", type=int, nargs="?", default=60)
     sub.add_parser("unmute")
+    br = sub.add_parser("browse", help="Jev drives agent-browser toward a goal"); br.add_argument("goal", nargs="+"); br.add_argument("--json", action="store_true")
     sy = sub.add_parser("say", help="tell the blacksmith something; Jev routes it"); sy.add_argument("text", nargs="+"); sy.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -60,6 +61,11 @@ def main() -> None:
         print(f"muted until {datetime.fromtimestamp(until):%H:%M}")
     elif args.cmd == "unmute":
         store.kv_set("muted_until", "0"); print("unmuted")
+    elif args.cmd == "browse":
+        from forge.browse import browse
+        r = browse(" ".join(args.goal), cfg)
+        print(json.dumps(r.__dict__) if args.json else
+              ("done" if r.ok else f"not done ({r.note})") + f" @ {r.title or r.url}\n  " + "\n  ".join(r.steps))
     elif args.cmd == "say":
         from forge.route import route
         r = route(" ".join(args.text), cfg)

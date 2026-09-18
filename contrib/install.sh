@@ -27,10 +27,11 @@ fi
 
 # systemd user units: heartbeat timer + avatar service
 mkdir -p ~/.config/systemd/user
-cp "$HERE/forged.service" "$HERE/forged-now.service" "$HERE/forged.timer" "$HERE/forge-sprite.service" ~/.config/systemd/user/
+cp "$HERE/forged.service" "$HERE/forged-now.service" "$HERE/forged.timer" "$HERE/forge-sprite.service" "$HERE/forge-browser.service" ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now forged.timer
-systemctl --user enable forge-sprite.service
+systemctl --user enable forge-sprite.service forge-browser.service
+systemctl --user restart forge-browser.service
 systemctl --user restart forge-sprite.service
 
 # app launcher + icon (+ autostart is the service's WantedBy=graphical-session.target)
