@@ -258,6 +258,7 @@ class Sprite(Gtk.Window):
         self._frame_at = 0.0
         self.cfg: dict = {}
         self._suppress_save = 0.0
+        self._settle_until = 0.0
         self._press: tuple[int, int, int] | None = None  # x_root, y_root, time
         self._dragging = False
         self._grab = (0, 0)
@@ -322,10 +323,26 @@ class Sprite(Gtk.Window):
         self._set_input_shape()
         self.area.queue_draw()
 
+    def wanted_pos(self) -> tuple[int, int] | None:
+        """Where he is supposed to be, clamped onto a monitor that still exists — a saved spot on
+        a display that has since been unplugged would otherwise park him off-screen."""
+        if "x" not in self.cfg or "y" not in self.cfg:
+            return None
+        x, y = int(self.cfg["x"]), int(self.cfg["y"])
+        d = self.get_screen().get_display()
+        sw, sh = self.sprite_size()
+        for i in range(d.get_n_monitors()):
+            g = d.get_monitor(i).get_geometry()
+            if g.x <= x < g.x + g.width and g.y <= y < g.y + g.height:
+                return (max(g.x, min(x, g.x + g.width - sw)),
+                        max(g.y, min(y, g.y + g.height - sh)))
+        return None
+
     def _place(self, w: int, h: int) -> None:
         self._suppress_save = time.time() + 1.0
-        if "x" in self.cfg and "y" in self.cfg:
-            self.move(int(self.cfg["x"]), int(self.cfg["y"]))
+        if pos := self.wanted_pos():
+            self.move(*pos)
+            self._settle_until = time.time() + 8      # re-assert while the WM finishes mapping
             return
         corner = self.cfg.get("corner") or self.cli_corner or "bottom-right"
         mon = self.get_screen().get_display().get_primary_monitor().get_workarea()
@@ -602,6 +619,11 @@ class Sprite(Gtk.Window):
                                     instant=self.instant)
         elif self.bubble.get_visible():
             self.bubble.hide()
+        if (not self._dragging and time.time() < self._settle_until
+                and (want := self.wanted_pos()) and self.get_position() != want):
+            # the compositor placed a DOCK window where it liked; put him back
+            self._suppress_save = time.time() + 1.0
+            self.move(*want)
         if time.time() - self._alive_at > 2:
             self._alive_at = time.time()
             try:
