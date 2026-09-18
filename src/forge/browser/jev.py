@@ -123,7 +123,11 @@ def ensure_chrome(cfg: config.Config, wait: float = 20.0) -> str | None:
     subprocess.Popen(
         ["systemd-run", "--user", "--quiet", "--collect", "--scope",
          "--slice=app-graphical.slice", b.binary, f"--user-data-dir={b.profile}",
-         f"--remote-debugging-port={b.cdp_port}", "--no-first-run", "--no-default-browser-check"],
+         f"--remote-debugging-port={b.cdp_port}", "--no-first-run", "--no-default-browser-check",
+         # Chrome builds its accessibility tree lazily and stays invisible to AT-SPI without
+         # this. It is what lets the desktop body reach what the DOM snapshot cannot — notably
+         # cross-origin iframes, which is where signup forms live.
+         "--force-renderer-accessibility"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     deadline = _t.time() + wait
     while _t.time() < deadline:
@@ -218,13 +222,23 @@ def _run_once(goal: str, url: str | None = None, cfg: config.Config | None = Non
                 page_txt = (page.get("text") or "").lower()[:4000]
                 if any(g in page_txt for g in GATES) and len(page_txt) < 2500:
                     res.note = "your turn — it needs a human (captcha / verification)"
+                    _keep_tab[0] = True
                     say.failed("Your turn: it needs a human check. Say 'continue' when done.")
                     _keep_tab[0] = True      # leave it exactly where you have to take over
                     break
                 status = state.get("status", "")
                 if status in ("done", "blocked", "error"):
                     res.ok = status == "done"
-                    _keep_tab[0] = res.ok      # leave the answer on screen; tidy up dead ends
+                    if status == "blocked":
+                        # "Blocked" means it wants a human. Forms inside a frame the snapshot
+                        # cannot cross (Proton's signup, most payment widgets) land here too.
+                        # Either way the useful thing is the page, left where it got stuck.
+                        res.note = "it's open where I got stuck — take it from here"
+                        say.failed("Got as far as I can. It's open for you.")
+                    # Keep the tab unless nothing happened. "Blocked" is the case where you most
+                    # need it open — it means the agent wants a human, and closing the page is
+                    # the one thing that makes taking over impossible.
+                    _keep_tab[0] = res.ok or status == "blocked" or bool(res.steps)
                     res.note = "" if res.ok else status
                     (say.done(f"Done — {res.title or 'have a look'}.") if res.ok
                      else say.failed(f"Couldn't finish: {status}."))
