@@ -27,12 +27,15 @@ fi
 
 # systemd user units: heartbeat timer + avatar service
 mkdir -p ~/.config/systemd/user
-cp "$HERE/forged.service" "$HERE/forged-now.service" "$HERE/forged.timer" "$HERE/forge-sprite.service" "$HERE/forge-browser.service" ~/.config/systemd/user/
+cp "$HERE/forged.service" "$HERE/forged-now.service" "$HERE/forged.timer" "$HERE/forge-sprite.service" ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now forged.timer
-systemctl --user enable forge-sprite.service forge-browser.service
-systemctl --user restart forge-browser.service
+systemctl --user enable forge-sprite.service
 systemctl --user restart forge-sprite.service
+
+# Firefox launcher override: same Firefox, plus the remote-agent port so the smith can drive
+# tabs in YOUR browser (loopback only). Takes effect on the next Firefox start.
+cp "$HERE/firefox.desktop" ~/.local/share/applications/firefox.desktop
 
 # app launcher + icon (+ autostart is the service's WantedBy=graphical-session.target)
 mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps

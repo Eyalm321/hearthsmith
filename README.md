@@ -69,4 +69,12 @@ Delegation enqueues to `hyperpanes.delegate_queue` (default `forge`); drain it w
 Not built yet. The daemon writes `sprite.json` (`state ∈ idle | forge | alert | sleep`, `text`,
 `urgency`); the renderer is a separate process. Plan: layered spritesheets + palette LUT so the
 blacksmith is customizable without new art.
-- `.agent-browser/` — the smith's own browser profile (forge-browser.service, :4835). Login once via `AB_PORT=4835 node ~/dev/agent-browser/src/cli.ts daemon --headed` from your terminal if a site needs it.
+
+## Browser
+
+He drives **your** Firefox — a normal tab in the window you already have open, over WebDriver
+BiDi (`--remote-debugging-port 9222`, loopback only; `contrib/firefox.desktop` adds the flag to
+every launch). You watch, you can take over, your logins are already there. No headless
+browser, no separate profile. Loop: Firefox lists actionable elements → Jev picks action +
+target (typed decision, ~0.5s) → Firefox clicks/types. Without the port he can still open the
+URL for you.

@@ -11,6 +11,7 @@ dependencies = [
     "system-one-adapter[openai]>=0.1.4",
     "typesafe-sdk>=0.6",
     "pyyaml>=6",
+    "websockets>=17.1",
 ]
 
 [project.scripts]
