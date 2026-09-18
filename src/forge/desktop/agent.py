@@ -355,15 +355,14 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
             # wastes a cycle and invites wandering into whatever else is open.
             browser = next((w for w in wins if w.app.lower() in BROWSERS), None)
             if (not in_browser and browser and _navigate_url(goal, cfg, True)
-                    and not _launch_target(goal)):
-                if True:
-                    if not dry and browser.shell_id:
-                        atspi.activate_window(browser.shell_id)
-                        time.sleep(0.4)
-                    res.steps.append(f"focus {browser.app}")
-                    win, in_browser = browser, True
-                    els = atspi.elements(win, limit=70)
-                    res.window = f"{win.app}: {win.title}"
+                and not _launch_target(goal)):
+                if not dry and browser.shell_id:
+                    atspi.activate_window(browser.shell_id)
+                    time.sleep(0.4)
+                res.steps.append(f"focus {browser.app}")
+                win, in_browser = browser, True
+                els = atspi.elements(win, limit=70)
+                res.window = f"{win.app}: {win.title}"
             nav_url = _navigate_url(goal, cfg, in_browser)
             if nav_url in visited or len(visited) >= 2:
                 nav_url = None          # already went there; work with the page you have

@@ -106,6 +106,42 @@ def _workdir(text: str, snap) -> str:
     return str(Path.home())
 
 
+def _where(cfg: config.Config, brief: str, workdir: str, snap, hp) -> tuple[str, str | None]:
+    """Continue an agent's work, or start a fresh one?
+
+    Only panes already in this project are candidates — handing work to an agent sitting in an
+    unrelated repo is how a research errand ended up in someone else's checkout. Each candidate
+    is described by what it is actually doing (its last few lines), because "is this part of what
+    you are already doing?" cannot be answered from a pane label.
+    """
+    if snap is None:
+        return "spawn", None
+    here = [p for p in snap.panes if p.cwd and p.cwd.startswith(workdir)]
+    if not here:
+        return "spawn", None
+    doing = {}
+    for p in here[:6]:
+        tail = [ln.strip() for ln in hp.screen(p.id, tail=12).splitlines() if ln.strip()][-4:]
+        doing[p.id] = f"{p.label} ({p.activity}) — " + (" / ".join(tail)[:220] or "nothing on screen")
+    try:
+        a = _jev(cfg.decide, json.dumps({"assignment": brief, "project": workdir,
+                                         "open_agents_in_this_project": doing}),
+                 {"continues": Noul(instructions="This assignment continues work one of these "
+                                    "agents is already doing, rather than being a separate "
+                                    "concern that deserves its own agent."),
+                  "agent": Choice(instructions="Which agent is already on this work?",
+                                  criteria=doing)})
+    except Exception:  # noqa: BLE001 — no decider: a fresh agent is the safe default
+        return "spawn", None
+    if a["continues"]["noul"] > 0.6:
+        chosen = a["agent"]["choice"]
+        pane = next((p for p in here if p.id == chosen), None)
+        # never cut across an agent mid-task unless this really is the same thread of work
+        if pane and (pane.activity != "busy" or a["continues"]["noul"] > 0.85):
+            return "pane", chosen
+    return "spawn", None
+
+
 def _label(brief: str) -> str:
     words = [w for w in re.split(r"\W+", brief) if len(w) > 3][:4]
     return " ".join(words)[:40] or "forge task"
@@ -175,6 +211,20 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         line = _say(cfg.compose, f"The user just asked you to remember: '{text}' (due: {DUE[due_i]}).",
                     "Confirm in one short line, in character.") or f"Noted: {text} ({DUE[due_i]})."
         return Reply(intent, line, t.id, raw=raw)
+
+    if intent in ("spawn", "pane") and snap:
+        # The intent says "an agent should do this"; where it lands is a separate question.
+        brief_for_place = _brief(text)
+        placed, pane_id = _where(cfg, brief_for_place, _workdir(text, snap), snap, hp)
+        if placed == "pane" and pane_id:
+            pane = next((p for p in snap.panes if p.id == pane_id), None)
+            proj = (snap.project_for_cwd(pane.cwd) or {}).get("name") if pane else None
+            if pane and hp.type_into(pane_id, brief_for_place, user_originated=True):
+                t = store.add(brief_for_place, project=proj)
+                store.set_state(t.id, "delegated")
+                return Reply("pane", f"'{pane.label}' is already on that — handed it over.",
+                             t.id, pane_id, raw)
+        intent = "spawn"
 
     if intent == "spawn":
         brief = _brief(text)

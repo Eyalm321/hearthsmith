@@ -74,6 +74,11 @@ While either body works, the avatar narrates it — "clicking One way", "typing 
 'Zurich'" — so a task running in his Chrome is still visible on your desktop. Progress lines skip
 the typewriter and expire in seconds; a nag still types out and stays.
 
+Work aimed at an agent goes to the right one: panes **already in that project** are candidates,
+each described by what it is actually doing (its last few lines, not its label), and the question
+is whether the assignment continues that work or is a separate concern deserving its own agent. A
+busy agent is only interrupted when it really is the same thread of work.
+
 ## Two bodies, one brain
 
 Jev decides; where the hands are depends on the job.
