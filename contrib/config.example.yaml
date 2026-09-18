@@ -1,0 +1,18 @@
+# ~/.config/forge/config.yaml — every key optional; see src/forge/config.py
+decide:
+  backend: adapter                 # typesafe | openrouter | adapter | rules
+  adapter_model: deepseek/deepseek-v4.1-flash
+  adapter_base_url: https://openrouter.ai/api/v1
+  adapter_key_env: DSH_OPENROUTER_API_KEY
+compose:
+  ollama_url: http://admins-mac-mini.local:11434
+  ollama_model: hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q5_K_M
+  fallback_model: deepseek/deepseek-v4.1-flash
+hyperpanes:
+  allow_pane_input: false          # /input is arbitrary command exec; keep off
+  delegate_queue: forge
+nag:
+  min_gap_minutes: 45
+  quiet_hours: [23, 8]
+  markdown_file: ~/tasks.md
+  channels: [hyperpanes, notify]

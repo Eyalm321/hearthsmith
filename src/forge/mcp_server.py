@@ -6,12 +6,12 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from forge import config
 from forge.store import Store
 
-mcp = FastMCP("forge", instructions="Task ledger owned by the forge nagging pet. Prefer "
+mcp = MCPServer("forge", instructions="Task ledger owned by the forge nagging pet. Prefer "
               "forge_tasks_list before adding to avoid duplicates.")
 _store: Store | None = None
 

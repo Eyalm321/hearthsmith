@@ -1,0 +1,14 @@
+[Unit]
+Description=forge: one heartbeat of the task-nagging blacksmith
+
+[Service]
+Type=oneshot
+ExecStart=%h/dev/forge/.venv/bin/forged --once
+# holds DSH_OPENROUTER_API_KEY (or TYPESAFE_API_KEY); chmod 600
+EnvironmentFile=%h/.config/forge/env
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Slice=agents.slice
+MemoryMax=1G
+Nice=10
+TimeoutStartSec=300
