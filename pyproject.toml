@@ -41,3 +41,8 @@ line-length = 100
 [tool.ruff.lint]
 # local wall-clock is the point (quiet hours, "due in 3h"); tz-aware would be wrong here
 ignore = ["DTZ"]
+
+[tool.ruff.lint.per-file-ignores]
+# walking a live accessibility tree: any node can go defunct between two calls, and logging
+# each one would drown the journal in noise — skipping the node IS the handling
+"src/forge/desktop/atspi.py" = ["S110", "S112"]

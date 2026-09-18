@@ -34,6 +34,8 @@ class Element:
     fillable: bool
     app: str
     window: str
+    acc: object = None       # the live accessible, for freshness checks
+    clickable: bool = True
 
     @property
     def cx(self) -> int:
@@ -71,7 +73,7 @@ def shell_windows() -> list[dict]:
     try:
         out = subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell",
                               "--object-path", "/org/forge/Windows", "--method", "org.forge.Windows.List"],
-                             capture_output=True, text=True, timeout=3).stdout.strip()
+                             capture_output=True, text=True, timeout=3, check=False).stdout.strip()
         # gdbus prints ('<json>',)
         return json.loads(out[2:-3].encode().decode("unicode_escape")) if out.startswith("('") else []
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -82,7 +84,7 @@ def activate_window(win_id: int) -> bool:
     try:
         out = subprocess.run(["gdbus", "call", "--session", "--dest", "org.gnome.Shell",
                               "--object-path", "/org/forge/Windows", "--method", "org.forge.Windows.Activate",
-                              str(win_id)], capture_output=True, text=True, timeout=3).stdout
+                              str(win_id)], capture_output=True, text=True, timeout=3, check=False).stdout
         return "true" in out
     except (OSError, subprocess.SubprocessError):
         return False
@@ -209,10 +211,60 @@ def elements(win: Window, limit: int = 80, max_depth: int = 40) -> list[Element]
             ex, ey, ew, eh = ext
             if win.shell_id and (fx, fy) == (0, 0):
                 ex, ey = ex + win.x, ey + win.y  # Wayland: window-relative → screen
-            out.append(Element(len(out), role, name[:80], ex, ey, ew, eh, fillable, win.app, win.title))
+            out.append(Element(len(out), role, name[:80], ex, ey, ew, eh, fillable,
+                               win.app, win.title, c, role not in ("text", "entry", "password text")
+                               or not fillable))
             if len(out) >= limit:
                 break
     return out
+
+
+def fresh(el: Element, win: Window, tol: int = 6) -> Element | None:
+    """Re-read the element right before acting: gone, hidden, or moved more than `tol` px ⇒ the
+    decision was made against a stale tree, so don't click into whatever is there now.
+    (Guard idea from browser-use/jev-ultrafast, MIT.)"""
+    if el.acc is None:
+        return el
+    try:
+        if not _showing(el.acc):
+            return None
+        if el.acc.getState().contains(pyatspi.STATE_DEFUNCT):
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    ext = _extents(el.acc)
+    if not ext or ext[2] < 3 or ext[3] < 3:
+        return None
+    ex, ey, ew, eh = ext
+    fx, fy = (_extents(win.acc) or (0, 0, 0, 0))[:2]
+    if win.shell_id and (fx, fy) == (0, 0):
+        ex, ey = ex + win.x, ey + win.y
+    if abs(ex - el.x) > tol or abs(ey - el.y) > tol:
+        return None
+    el.x, el.y, el.w, el.h = ex, ey, ew, eh
+    return el
+
+
+def signature(win: Window, limit: int = 70) -> tuple[int, tuple]:
+    """Cheap fingerprint of what's on screen, to tell whether an action changed anything."""
+    els = elements(win, limit=limit)
+    return len(els), tuple((e.role, e.name) for e in els[:20])
+
+
+def wait_settled(win: Window, before: tuple[int, tuple], cap_ms: int = 300,
+                 poll_ms: int = 50) -> bool:
+    """Wait until the tree actually changes, capped. Beats a fixed sleep: a combobox that pops
+    suggestions in 40ms doesn't cost a second, and a slow one still gets its window."""
+    import time as _t
+    deadline = _t.time() + cap_ms / 1000
+    while _t.time() < deadline:
+        _t.sleep(poll_ms / 1000)
+        try:
+            if signature(win) != before:
+                return True
+        except Exception:  # noqa: BLE001
+            return False
+    return False
 
 
 def active_window() -> Window | None:

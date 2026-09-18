@@ -85,6 +85,15 @@ Setup (once):
   frame rects over the session bus, read-only.
 - user in the `input` group (for `/dev/uinput`).
 
+One Jev request per cycle carries *speculative heads* — the operation plus a target for each
+operation that needs one, each head offering only compatible elements — so whichever operation
+wins already has its target. Before acting he re-reads the element (gone, hidden or moved ⇒
+re-observe instead of clicking blind), and after acting he waits for the tree to actually change
+rather than sleeping a fixed amount. Those three ideas come from
+[browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast) (MIT), which does the
+same thing for Chrome over CDP; forge keeps AT-SPI + uinput so it works in every app, in the
+windows you can see.
+
 `forge do "in Firefox, search for 'lw-pla filament'"` · `forge windows` shows what he sees.
 Custom-drawn surfaces (games, terminal grids) are invisible to AT-SPI — screenshot+vision is the
 fallback there, not built yet.

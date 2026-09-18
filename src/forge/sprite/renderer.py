@@ -16,6 +16,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import ClassVar
 
 os.environ.setdefault("GDK_BACKEND", "x11")
 
@@ -69,8 +70,9 @@ class Bubble(Gtk.Window):
     TAIL = 4                    # units
     COLS = 100                  # max width in units
     CPS = 32
-    C = {"o": (0.23, 0.15, 0.10), "f": (0.91, 0.76, 0.60), "h": (0.97, 0.87, 0.75),
-         "s": (0.80, 0.62, 0.45), "t": (0.17, 0.11, 0.07)}
+    C: ClassVar[dict[str, tuple[float, float, float]]] = {
+        "o": (0.23, 0.15, 0.10), "f": (0.91, 0.76, 0.60), "h": (0.97, 0.87, 0.75),
+        "s": (0.80, 0.62, 0.45), "t": (0.17, 0.11, 0.07)}
 
     def __init__(self):
         super().__init__(type=Gtk.WindowType.POPUP)
@@ -523,7 +525,7 @@ class Sprite(Gtk.Window):
         def run():
             try:
                 out = subprocess.run([str(Path.home() / "dev/forge/.venv/bin/forge"), "say", "--json", text],
-                                     capture_output=True, text=True, timeout=120)
+                                     capture_output=True, text=True, timeout=120, check=False)
                 r = json.loads(out.stdout.strip().splitlines()[-1]) if out.stdout.strip() else \
                     {"intent": "error", "text": (out.stderr or "no reply").strip()[-160:]}
             except Exception as e:  # noqa: BLE001
@@ -596,7 +598,7 @@ class Sprite(Gtk.Window):
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
         oy = self.bubble_h
-        sw, sh = self.sprite_size()
+        sw, _sh = self.sprite_size()
         if self.pack:
             frames = self.pack.frames(self.state)
             if frames:
