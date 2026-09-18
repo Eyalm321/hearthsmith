@@ -100,6 +100,9 @@ class VoiceCfg:
     words_per_second: float = 2.6
     max_chunk_seconds: float = 14.0
     timeout_seconds: int = 150  # space queue + ~20s synth; heartbeat has 300
+    # PipeWire sink name (`pactl list sinks short`); "" = default, which on this box is the
+    # motherboard line-out nobody listens to
+    sink: str = ""
     cache_dir: Path = STATE_DIR / "voice"
     hf_token_env: str = "HF_TOKEN"  # optional; anonymous ZeroGPU quota is small
 

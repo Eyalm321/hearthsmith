@@ -103,16 +103,18 @@ class Voice:
         except Exception as e:  # noqa: BLE001 — the space is down or queued out; nag goes on without sound
             log.warning("voice: synth failed: %s", e)
             return False
-        return bool(wavs) and all(play(w, self.cfg.timeout_seconds) for w in wavs)
+        return bool(wavs) and all(play(w, self.cfg.timeout_seconds, self.cfg.sink) for w in wavs)
 
 
-def play(wav: Path, timeout: int) -> bool:
+def play(wav: Path, timeout: int, sink: str = "") -> bool:
     """Blocking on purpose: forged is a oneshot unit, a backgrounded player dies with it."""
-    for cmd in (["pw-play"], ["paplay"], ["aplay", "-q"]):
+    players = [(["pw-play"], ["--target", sink]), (["paplay"], ["--device", sink]),
+               (["aplay", "-q"], [])]
+    for cmd, target in players:
         if shutil.which(cmd[0]) is None:
             continue
         try:
-            subprocess.run([*cmd, str(wav)], check=True, timeout=timeout,
+            subprocess.run([*cmd, *(target if sink else []), str(wav)], check=True, timeout=timeout,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except (OSError, subprocess.SubprocessError) as e:

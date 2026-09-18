@@ -30,3 +30,4 @@ voice:
   ref: assets/voice/dwarf.wav      # the clip IS the voice — swap it, he sounds like someone else
   variant: AuK (Base)              # or "AuK-Flash ⚡" (4-step, faster, rougher)
   hf_token_env: HF_TOKEN           # optional; anonymous ZeroGPU quota is small
+  sink: ""                         # PipeWire sink name (`pactl list sinks short`); "" = default output
