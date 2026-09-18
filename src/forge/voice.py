@@ -3,6 +3,10 @@ Nothing is trained, nothing is stored but wavs — the clip in assets/voice IS t
 
 synth(text) -> [wav paths]  (cached by text+clip, so repeated lines cost nothing)
 speak(text) -> bool         (synth, then play through PipeWire; never raises)
+
+Two engines, same clip: AuK on the HF space is the voice we want; the free ZeroGPU quota runs
+out after a handful of lines, so the local Chatterbox server (~/dev/voice-clone) takes over
+until it comes back. Both are zero-shot from the same wav, so he stays the same dwarf.
 """
 
 from __future__ import annotations
@@ -50,15 +54,26 @@ class Voice:
     def __init__(self, cfg: VoiceCfg):
         self.cfg = cfg
         self._client = None
+        self._fb_client = None
+        self.engine = "auk"  # what actually spoke last; "chatterbox" once AuK refused
 
     def available(self) -> bool:
         return self.cfg.enabled and self.cfg.ref.exists()
 
-    def _key(self, text: str) -> str:
+    def _key(self, text: str, engine: str = "auk") -> str:
         h = hashlib.sha1()
         h.update(self.cfg.ref.read_bytes())
-        h.update(f"|{self.cfg.variant}|{self.cfg.seed}|{text}".encode())
+        tag = self.cfg.variant if engine == "auk" else engine
+        h.update(f"|{tag}|{self.cfg.seed}|{text}".encode())
         return h.hexdigest()[:20]
+
+    def _fallback(self):
+        if self._fb_client is None and self.cfg.fallback_url:
+            from gradio_client import Client
+
+            self._fb_client = Client(self.cfg.fallback_url, verbose=False,
+                                     download_files=str(self.cfg.cache_dir), analytics_enabled=False)
+        return self._fb_client
 
     def _connect(self):
         if self._client is None:
@@ -73,27 +88,55 @@ class Voice:
 
     def synth(self, text: str) -> list[Path]:
         """One wav per chunk, in order. Empty list = could not synthesize."""
-        from gradio_client import handle_file
-
         self.cfg.cache_dir.mkdir(parents=True, exist_ok=True)
         wavs = []
         for part in chunk(text, self.cfg.words_per_second, self.cfg.max_chunk_seconds):
             out = self.cfg.cache_dir / f"{self._key(part)}.wav"
+            if out.exists():
+                wavs.append(out)
+                continue
+            if self.engine == "auk":
+                try:
+                    self._store(self._auk(part), out)
+                    wavs.append(out)
+                    continue
+                except Exception as e:  # quota, queue, space asleep: all mean "not now"
+                    if not self.cfg.fallback_url:
+                        raise
+                    log.warning("voice: AuK refused (%s); falling back to chatterbox", str(e)[:120])
+                    self.engine = "chatterbox"
+            out = self.cfg.cache_dir / f"{self._key(part, 'chatterbox')}.wav"
             if not out.exists():
-                got = self._connect().predict(
-                    use_pe=False,
-                    variant=self.cfg.variant,
-                    audio=handle_file(str(self.cfg.ref)),
-                    instruction=INSTRUCTION.format(text=part),
-                    gen_seconds=seconds_for(part, self.cfg.words_per_second,
-                                            self.cfg.max_chunk_seconds),
-                    nfe=32, cfg=2.0, seed=self.cfg.seed,
-                    api_name=API,
-                )
-                shutil.move(got, out)
-                shutil.rmtree(Path(got).parent, ignore_errors=True)  # gradio's per-call dir
+                self._store(self._chatterbox(part), out)
             wavs.append(out)
         return wavs
+
+    def _auk(self, part: str) -> str:
+        from gradio_client import handle_file
+
+        return self._connect().predict(
+            use_pe=False,
+            variant=self.cfg.variant,
+            audio=handle_file(str(self.cfg.ref)),
+            instruction=INSTRUCTION.format(text=part),
+            gen_seconds=seconds_for(part, self.cfg.words_per_second, self.cfg.max_chunk_seconds),
+            nfe=32, cfg=2.0, seed=self.cfg.seed,
+            api_name=API,
+        )
+
+    def _chatterbox(self, part: str) -> str:
+        from gradio_client import handle_file
+
+        return self._fallback().predict(
+            text=part, ref_override=handle_file(str(self.cfg.ref)),
+            exaggeration=self.cfg.fallback_exaggeration, cfg_weight=self.cfg.fallback_cfg_weight,
+            api_name="/ui_synth",
+        )
+
+    @staticmethod
+    def _store(got: str, out: Path) -> None:
+        shutil.move(got, out)
+        shutil.rmtree(Path(got).parent, ignore_errors=True)  # gradio's per-call dir
 
     def speak(self, text: str) -> bool:
         if not self.available():

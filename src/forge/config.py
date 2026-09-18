@@ -105,6 +105,11 @@ class VoiceCfg:
     sink: str = ""
     cache_dir: Path = STATE_DIR / "voice"
     hf_token_env: str = "HF_TOKEN"  # optional; anonymous ZeroGPU quota is small
+    # when the space refuses (free ZeroGPU lasts ~8 lines/day): the local Chatterbox server,
+    # same clip, rougher clone but on this box. "" = no fallback, he stays quiet.
+    fallback_url: str = "http://192.168.0.91:7860/"
+    fallback_exaggeration: float = 0.5
+    fallback_cfg_weight: float = 0.5
 
 
 @dataclass
