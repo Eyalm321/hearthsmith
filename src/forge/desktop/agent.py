@@ -82,6 +82,7 @@ def _jev(cfg: config.DecideCfg, state, questions: dict) -> dict:
 KNOWN_SITES = {"google": "google.com", "youtube": "youtube.com", "github": "github.com",
                "reddit": "reddit.com", "wikipedia": "wikipedia.org", "amazon": "amazon.com",
                "openrouter": "openrouter.ai", "huggingface": "huggingface.co", "x": "x.com",
+    "protonmail": "proton.me", "proton": "proton.me", "fastmail": "fastmail.com",
                "twitter": "x.com", "gmail": "mail.google.com", "claude": "claude.ai",
                "openai": "openai.com", "anthropic": "anthropic.com", "hackernews": "news.ycombinator.com"}
 
@@ -95,6 +96,8 @@ NAMED_PLACES = {
     "google calendar": "https://calendar.google.com",
     "google docs": "https://docs.google.com",
     "hacker news": "https://news.ycombinator.com",
+    "protonmail signup": "https://account.proton.me/signup",
+    "proton signup": "https://account.proton.me/signup",
     "youtube music": "https://music.youtube.com",
 }
 
