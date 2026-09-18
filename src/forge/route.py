@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,24 +80,78 @@ def _say(cfg: config.ComposeCfg, situation: str, instruction: str) -> str | None
 
 
 # "open a new pane with claude and ask it to research X" — the pane is the plumbing, X is the job.
+# "can you open a terminal" is all plumbing: nothing to assign, so nothing gets typed.
 BRIEF_RE = re.compile(r"\b(?:and\s+)?(?:ask|tell|get)\s+it\s+to\s+(.+)$", re.IGNORECASE | re.DOTALL)
-PLUMBING = re.compile(r"^\s*(?:on\s+hyperpanes[,\s]*)?(?:please\s+)?(?:open|start|spawn|make|create)\s+"
-                      r"(?:a\s+)?new\s+(?:pane|agent|terminal|window)\s*(?:with\s+\w+)?\s*(?:and\s+)?",
+PLUMBING = re.compile(r"^\s*(?:on\s+hyperpanes[,\s]*)?"
+                      r"(?:(?:i'?d|i\s+would)\s+like\s+(?:you\s+)?to\s+|i\s+(?:want|need)\s+you\s+to\s+"
+                      r"|(?:can|could|would|will)\s+you\s+)?(?:please\s+)?"
+                      r"(?:open|start|spawn|make|create|launch)\s+(?:me\s+)?(?:up\s+)?"
+                      r"(?:a\s+|an\s+|another\s+)?"
+                      r"(?:(?:new|fresh|blank|empty|native|real|regular|normal|plain|linux|system|"
+                      r"separate|standalone)\s+)*"
+                      r"(?:pane|agent|terminal|window|shell|claude|ptyxis|gnome-terminal)\s*(?:window\s*)?"
+                      r"(?:(?:with|running)\s+\w+)?\s*(?:for\s+me)?\s*(?:please)?\s*(?:and\s+)?",
                       re.IGNORECASE)
+LOCATION = re.compile(r"(?:in|inside|at|under|for)\s+(?:the\s+)?[\w.~/-]+(?:\s+(?:project|repo|folder|dir))?",
+                      re.IGNORECASE)
+# "…in linux native terminal", "…outside hyperpanes": says which kind of terminal, not what to do
+WHERE_WORDS = {"in", "on", "inside", "outside", "of", "using", "with", "via", "as", "the", "a", "an",
+               "my", "not", "instead", "please", "linux", "native", "real", "regular", "normal",
+               "actual", "system", "proper", "standalone", "separate", "plain", "terminal",
+               "shell", "window", "app", "emulator", "ptyxis", "gnome", "gnome-terminal",
+               "hyperpanes", "pane", "os"}
+NATIVE = re.compile(r"\b(?:native|ptyxis|gnome[- ]terminal|(?:linux|system|os)\s+terminal"
+                    r"|(?:not|outside(?:\s+of)?|without|instead\s+of)\s+(?:in\s+)?hyperpanes"
+                    r"|(?:real|regular|normal|actual|proper|standalone|separate)\s+(?:linux\s+)?"
+                    r"(?:terminal|shell|window))\b", re.IGNORECASE)
+WANTS_AGENT = re.compile(r"\b(?:claude|agent)\b", re.IGNORECASE)
+TERMINALS = ("ptyxis", "gnome-terminal", "kgx", "foot", "konsole", "alacritty", "kitty", "xterm")
 
 
 def _brief(text: str) -> str:
-    """Strip the 'open a pane and ask it to' scaffolding; what's left is the actual assignment."""
+    """Strip the 'open a pane and ask it to' scaffolding; what's left is the actual assignment
+    ("" when the request was only to open something)."""
     if m := BRIEF_RE.search(text):
         return m.group(1).strip(" .")
-    return PLUMBING.sub("", text).strip(" .") or text
+    rest = PLUMBING.sub("", text).strip(" ,.?!")
+    # "open a terminal in forge" / "…in linux native terminal" — the tail says where, not what
+    if LOCATION.fullmatch(rest) or set(re.findall(r"[\w-]+", rest.lower())) <= WHERE_WORDS:
+        return ""
+    return rest
+
+
+def _native_terminal(text: str) -> bool:
+    """He asked for a terminal outside hyperpanes — a real window on the desktop — and nothing
+    else. Anything with an assignment still goes to a pane, where an agent can be watched."""
+    return not _brief(text) and bool(NATIVE.search(text)) and bool(
+        re.search(r"\b(?:terminal|shell|ptyxis|gnome-terminal)\b", text, re.IGNORECASE))
+
+
+def _open_native_terminal(cwd: str) -> str | None:
+    """A terminal window on the desktop. Returns which one, or None when there isn't any."""
+    exe = next((t for t in TERMINALS if shutil.which(t)), None)
+    if not exe:
+        return None
+    args = [exe, "--new-window"] if exe == "ptyxis" else [exe]
+    # Scoped to the graphical session like desktop launches (see desktop/agent.py): a bare
+    # Popen from the pet's own cgroup is what the OOM killer culls first.
+    subprocess.Popen(["systemd-run", "--user", "--quiet", "--collect", "--scope",
+                      "--slice=app-graphical.slice", f"--working-directory={cwd}", *args],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return exe
+
+
+def _wants_agent(text: str) -> bool:
+    """A pane with claude in it, or a plain shell? With an assignment it's always claude — someone
+    has to do the work. Without one, only if he named the agent: "open a terminal" is a terminal."""
+    return bool(_brief(text)) or bool(WANTS_AGENT.search(text))
 
 
 def _workdir(text: str, snap) -> str:
     """Which folder the new agent starts in — Claude inherits it as its workspace, so it decides
     what the agent can see. Matched against the assignment only: "on hyperpanes open a pane…"
     names the app that hosts the pane, not the folder the work belongs to."""
-    low = _brief(text).lower()
+    low = PLUMBING.sub("", text).lower()      # keeps "…in forge", drops "on hyperpanes open…"
     for p in (snap.projects if snap else []):
         if p["name"].lower() in low:
             return p["path"]
@@ -158,6 +213,18 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
     markdown.sync(cfg.nag.markdown_file, store)
     tasks = store.list("open")
     snap: Snapshot | None = hp.snapshot(with_screens=False)
+
+    # "open a terminal in linux native terminal": a desktop window, not a pane — and no
+    # decider needed, there is nothing to classify.
+    if _native_terminal(text):
+        cwd = _workdir(text, snap)
+        exe = _open_native_terminal(cwd)
+        store.record_run(text, "desktop", bool(exe),
+                         [f"launched {exe} in {cwd}"] if exe else [], note="" if exe else "no terminal app found",
+                         target=exe)
+        if exe:
+            return Reply("desktop", f"Opened {exe} in {Path(cwd).name or cwd}.")
+        return Reply("desktop", "No terminal app on this machine that I know of.")
 
     state = {"user_said": text,
              "open_tasks": {t.id: t.title for t in tasks[:40]},
@@ -250,7 +317,9 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
                     "Confirm in one short line, in character.") or f"Noted: {text} ({DUE[due_i]})."
         return Reply(intent, line, t.id, raw=raw)
 
-    if intent in ("spawn", "pane") and snap:
+    if intent in ("spawn", "pane") and not _brief(text):
+        intent = "spawn"          # nothing to hand to anyone — he only asked for a pane
+    elif intent in ("spawn", "pane") and snap:
         # The intent says "an agent should do this"; where it lands is a separate question.
         brief_for_place = _brief(text)
         placed, pane_id = _where(cfg, brief_for_place, _workdir(text, snap), snap, hp)
@@ -276,6 +345,23 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         # "claude" silently falls back to a plain shell pane
         exe = shutil.which("claude") or str(Path.home() / ".local/bin/claude")
         cwd = _workdir(text, snap)
+        where = Path(cwd).name or cwd
+        if not brief:
+            # "open a terminal": just the pane — a shell, or claude if he said so — and
+            # nothing typed into it. His own words are not an assignment.
+            with_claude = _wants_agent(text)
+            pane_id = hp.new_pane(command=exe if with_claude else None, cwd=cwd,
+                                  label="claude" if with_claude else "terminal")
+            if not pane_id:
+                return Reply(intent, "Couldn't open a pane.", raw=raw)
+            if with_claude:
+                hp.answer_trust(pane_id)
+                hp.wait_ready(pane_id)
+            store.record_run(text, "spawn", True,
+                             [f"opened a {'claude' if with_claude else 'shell'} pane in {cwd}"],
+                             target=pane_id)
+            return Reply(intent, f"Opened a {'claude pane' if with_claude else 'terminal'} "
+                         f"in {where}.", None, pane_id, raw)
         pane_id = hp.new_pane(command=exe, cwd=cwd, label=_label(brief))
         if not pane_id:
             intent = "pane"          # couldn't open one; fall through to an existing pane
@@ -285,7 +371,6 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
             hp.answer_trust(pane_id)          # nothing is accepted until the folder is trusted
             ready = hp.wait_ready(pane_id)
             if ready and hp.type_into(pane_id, brief, user_originated=True):
-                where = Path(cwd).name or cwd
                 store.record_run(brief, "spawn", True,
                                  [f"opened a pane in {cwd}", "answered the folder-trust prompt",
                                   "typed the assignment"], task_id=t.id, target=pane_id)
