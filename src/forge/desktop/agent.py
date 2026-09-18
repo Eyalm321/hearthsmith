@@ -171,9 +171,20 @@ NOISE = re.compile(r"\b(?:go to|open|show me|find|look up|visit|navigate to|the|
                    r"repo|repository|page|site|website)\b", re.IGNORECASE)
 
 
+SIGNUP = {"proton.me": "https://account.proton.me/signup",
+          "fastmail.com": "https://www.fastmail.com/signup/",
+          "github.com": "https://github.com/signup"}
+SIGNUP_RE = re.compile(r"\b(register|sign ?up|create (?:a |an )?(?:new )?account|"
+                       r"new (?:email )?(?:address|account))\b", re.IGNORECASE)
+
+
 def _leftover(goal: str, domain: str) -> str:
-    """What the goal asks for beyond the bare domain — 'github.com openshorts repo' → 'openshorts'."""
+    """What the goal asks for beyond the site itself — 'github.com openshorts repo' → 'openshorts'.
+    The site's own names count as the site, not as something to search for."""
     rest = goal.replace(domain, " ")
+    for name, host in KNOWN_SITES.items():
+        if host == domain:
+            rest = re.sub(rf"\b{re.escape(name)}\b", " ", rest, flags=re.IGNORECASE)
     rest = NOISE.sub(" ", rest)
     return " ".join(rest.split()).strip(" .?!,")
 
@@ -201,6 +212,10 @@ def _navigate_url(goal: str, cfg: config.Config | None = None, in_browser: bool 
     if host is None:                   # "search youtube for X" names a site without an address
         host = next((d for n, d in KNOWN_SITES.items()
                      if re.search(rf"\b{re.escape(n)}\b", goal.lower())), None)
+    # A signup errand has a page of its own — searching a site for the word "register" lands
+    # nowhere useful, and this is the one destination worth being sure about.
+    if host and SIGNUP_RE.search(goal) and (page := SIGNUP.get(host)):
+        return page
     deep = bool(u and "/" in u.split("//", 1)[-1])      # a full path — open it as given
 
     # 1. an explicit query ("search for X", or quoted text) wins, scoped to the named site
