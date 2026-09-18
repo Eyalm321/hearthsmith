@@ -29,8 +29,11 @@ def _prompt(cfg: ComposeCfg, state: str, title: str, urgency: str) -> list[dict]
 def _ollama(cfg: ComposeCfg, messages: list[dict]) -> str | None:
     try:
         r = httpx.post(f"{cfg.ollama_url}/api/chat", timeout=60.0,
+                       # think:false — Ornith reasons first by default and a long state paragraph
+                       # burns the whole token budget before the actual line
                        json={"model": cfg.ollama_model, "messages": messages, "stream": False,
-                             "options": {"temperature": 0.8, "num_predict": 200}})
+                             "think": False,
+                             "options": {"temperature": 0.8, "num_predict": 300}})
         r.raise_for_status()
         return r.json()["message"]["content"].strip() or None
     except (httpx.HTTPError, KeyError, ValueError):
@@ -44,7 +47,7 @@ def _openrouter(cfg: ComposeCfg, messages: list[dict]) -> str | None:
     try:
         r = httpx.post(f"{cfg.fallback_base_url}/chat/completions", timeout=30.0,
                        headers={"Authorization": f"Bearer {key}"},
-                       json={"model": cfg.fallback_model, "messages": messages, "max_tokens": 200})
+                       json={"model": cfg.fallback_model, "messages": messages, "max_tokens": 300})
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip() or None
     except (httpx.HTTPError, KeyError, ValueError, IndexError):
