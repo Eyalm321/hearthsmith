@@ -225,7 +225,7 @@ class Sprite(Gtk.Window):
 
         m.append(Gtk.SeparatorMenuItem())
         item("Talk to him…", self.open_prompt)
-        item("Nag me now", lambda: self._systemctl("start", "forged.service"))
+        item("Nag me now", lambda: self._systemctl("start", "forged-now.service"))
         m.append(Gtk.SeparatorMenuItem())
         item("Hide", lambda: self._systemctl("stop", "forge-sprite.service"))
         m.show_all()

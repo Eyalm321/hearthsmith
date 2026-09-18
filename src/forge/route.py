@@ -123,7 +123,8 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         intent = "delegate"  # fall through
 
     if intent == "delegate":
-        job = hp.enqueue(cfg.hyperpanes.delegate_queue, text[:80], text, dedupe_key=None) if snap else None
+        job = (hp.enqueue(cfg.hyperpanes.delegate_queue, text[:80], text, dedupe_key=None)
+               if snap and cfg.hyperpanes.delegate_enabled else None)
         t = store.add(text)
         if job:
             store.set_state(t.id, "delegated")
@@ -142,10 +143,10 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
 
     if intent == "nag":
         from forge.daemon import heartbeat
-        out = heartbeat(cfg, store, hp, dry=True)
+        out = heartbeat(cfg, store, hp, dry=True, force=True)
         if "dry_run" in out:
             return Reply(intent, out["dry_run"]["text"], out["dry_run"]["task"], raw=raw)
-        return Reply(intent, "Nothing pressing. The bellows are quiet.", raw=raw)
+        return Reply(intent, out.get("text", "Nothing pressing. The bellows are quiet."), raw=raw)
 
     # ask / fallthrough
     situation = (f"The user said: '{text}'.\nOpen tasks: " +

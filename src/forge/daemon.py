@@ -51,28 +51,43 @@ def in_quiet_hours(cfg: config.NagCfg) -> bool:
     return (start <= h or h < end) if start > end else (start <= h < end)
 
 
-def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = False) -> dict:
+def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = False,
+              force: bool = False) -> dict:
+    """force = the user asked ("Nag me now", `forge say "what should I do"`): skip the quiet-hours
+    and min-gap gates and always say something, even if Jev would have stayed quiet."""
     state, tasks = build_state(store, hp, cfg)
     sprite = SpriteSink(cfg.sprite_path)
     last = store.last_nag_at()
 
-    if in_quiet_hours(cfg.nag):
-        sprite.write("sleep")
-        return {"skipped": "quiet_hours"}
-    if last and time.time() - last < cfg.nag.min_gap_minutes * 60:
-        sprite.write("idle")
-        return {"skipped": "min_gap", "next_in_min": round(cfg.nag.min_gap_minutes - (time.time() - last) / 60)}
+    if not force:
+        if in_quiet_hours(cfg.nag):
+            sprite.write("sleep")
+            return {"skipped": "quiet_hours"}
+        if last and time.time() - last < cfg.nag.min_gap_minutes * 60:
+            sprite.write("idle")
+            return {"skipped": "min_gap",
+                    "next_in_min": round(cfg.nag.min_gap_minutes - (time.time() - last) / 60)}
 
     d: Decision = decide(cfg.decide, state, tasks, last, cfg.nag.min_gap_minutes)
     log.info("decision %s", d.as_json())
-    if d.should_nag < 0.5 or d.task_id is None:
+    if not force and (d.should_nag < 0.5 or d.task_id is None):
         sprite.write("idle" if d.urgency == "ignorable" else "forge", urgency=d.urgency)
         return {"skipped": "not_now", "decision": json.loads(d.as_json())}
+    if d.task_id is None:
+        if not tasks:
+            text = "Ledger's clean. Nothing to hammer on."
+            sprite.write("idle", text, "ignorable")
+            if not dry:
+                NotifySink().send(text, "ignorable", None)
+            return {"forced": True, "text": text}
+        d.task_id = tasks[0].id
 
     task = store.get(d.task_id)
     if task is None:
         return {"skipped": "task_vanished"}
 
+    if d.channel == "delegate" and not cfg.hyperpanes.delegate_enabled:
+        d.channel = "hyperpanes"  # no worker drains the queue yet; don't lose the task into it
     if d.channel == "delegate" and hp.alive():
         job = hp.enqueue(cfg.hyperpanes.delegate_queue, task.title,
                          f"Task from the forge ledger: {task.title}\n{task.notes}".strip(),
@@ -82,6 +97,8 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
             text = f"Handing '{task.title}' to a worker pane."
             sprite.write("forge", text, d.urgency)
             store.log_nag(task.id, "delegate", d.urgency, text, d.as_json())
+            if not dry:
+                NotifySink().send(text, d.urgency, task)
             return {"delegated": task.id, "job": job}
 
     text, tier = compose(cfg.compose, state, task.title, d.urgency, want_llm=d.needs_llm >= 0.5)
@@ -110,6 +127,7 @@ def main() -> None:
     ap.add_argument("--once", action="store_true", help="one heartbeat and exit")
     ap.add_argument("--every", type=int, default=600, help="seconds between heartbeats")
     ap.add_argument("--dry", action="store_true", help="decide + compose, deliver nothing")
+    ap.add_argument("--force", action="store_true", help="user asked: ignore quiet hours / min gap, always speak")
     ap.add_argument("-v", action="store_true")
     a = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if a.v else logging.INFO,
@@ -120,7 +138,7 @@ def main() -> None:
                     cfg.hyperpanes.allow_pane_input)
     while True:
         try:
-            out = heartbeat(cfg, store, hp, dry=a.dry)
+            out = heartbeat(cfg, store, hp, dry=a.dry, force=a.force)
             print(json.dumps(out))
         except Exception:  # the loop is the product; log and go again
             log.exception("heartbeat failed")

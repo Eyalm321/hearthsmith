@@ -45,6 +45,9 @@ class HyperpanesCfg:
     # pane input is arbitrary command execution; nags go through /messages, never /input
     allow_pane_input: bool = False
     delegate_queue: str = "forge"
+    # off until something drains the queue (`hyperpanes worker --queue forge -- ...`); otherwise
+    # a "delegate" decision marks the task delegated and nothing ever happens
+    delegate_enabled: bool = False
 
 
 @dataclass

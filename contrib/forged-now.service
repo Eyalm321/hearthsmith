@@ -1,0 +1,12 @@
+[Unit]
+Description=forge: nag me now (user-requested, bypasses quiet hours / min gap)
+
+[Service]
+Type=oneshot
+ExecStart=%h/dev/forge/.venv/bin/forged --once --force
+EnvironmentFile=%h/.config/forge/env
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+Slice=agents.slice
+MemoryMax=1G
+TimeoutStartSec=300

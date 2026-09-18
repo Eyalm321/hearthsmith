@@ -11,6 +11,7 @@ compose:
 hyperpanes:
   allow_pane_input: false          # /input is arbitrary command exec; keep off
   delegate_queue: forge
+  delegate_enabled: false      # turn on once a worker drains the queue
 nag:
   min_gap_minutes: 45
   quiet_hours: [23, 8]
