@@ -82,7 +82,24 @@ def _merge(dc, data: dict):
     return dc
 
 
+ENV_FILE = Path.home() / ".config/forge/env"
+
+
+def load_env(path: Path = ENV_FILE) -> None:
+    """KEY=value lines → os.environ (never overrides). So `forge say` works from the sprite,
+    a shell, or a harness without each of them knowing where the keys live."""
+    try:
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    except OSError:
+        pass
+
+
 def load(path: Path = CONFIG_PATH) -> Config:
+    load_env()
     cfg = Config()
     if path.exists():
         _merge(cfg, yaml.safe_load(path.read_text()) or {})

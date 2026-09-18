@@ -255,20 +255,41 @@ class Sprite(Gtk.Window):
         w.set_keep_above(True)
         w.set_skip_taskbar_hint(True)
         w.set_type_hint(Gdk.WindowTypeHint.DIALOG)
-        w.set_default_size(340, 36)
+        w.set_app_paintable(True)
+        if (vis := w.get_screen().get_rgba_visual()) and w.get_screen().is_composited():
+            w.set_visual(vis)
+        css = Gtk.CssProvider()
+        css.load_from_data(b"""
+            #forge-prompt { background: rgba(20,20,22,0.96); border: 2px solid #ff9a2e;
+                            border-radius: 10px; padding: 6px 10px; }
+            #forge-prompt entry { background: transparent; border: none; box-shadow: none;
+                                  color: #f2f2f2; font-family: monospace; font-size: 15px;
+                                  caret-color: #ff9a2e; }
+            #forge-prompt label { color: #ff9a2e; font-family: monospace; font-size: 13px;
+                                  margin-right: 8px; }
+        """)
+        Gtk.StyleContext.add_provider_for_screen(w.get_screen(), css,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        box.set_name("forge-prompt")
+        box.pack_start(Gtk.Label(label="⚒"), False, False, 0)
         entry = Gtk.Entry()
-        entry.set_placeholder_text("Tell the smith…  (Enter to send, Esc to close)")
-        entry.set_size_request(340, 36)
-        w.add(entry)
-        x, y = self.get_position()
-        sw, sh = self.sprite_size()
-        w.move(x + sw + 8, y + self.bubble_h + sh - 40)
+        entry.set_placeholder_text("Tell the smith…   Enter to send · Esc to close")
+        entry.set_width_chars(60)
+        box.pack_start(entry, True, True, 0)
+        w.add(box)
+        mon = w.get_screen().get_display().get_primary_monitor().get_workarea()
+        pw = 640
+        w.set_default_size(pw, -1)
+        w.move(mon.x + (mon.width - pw) // 2, mon.y + 48)
         entry.connect("activate", lambda e: self._submit(e.get_text()))
-        w.connect("key-press-event", lambda _w, ev: self._close_prompt() if ev.keyval == Gdk.KEY_Escape else False)
+        w.connect("key-press-event",
+                  lambda _w, ev: self._close_prompt() if ev.keyval == Gdk.KEY_Escape else False)
         w.connect("focus-out-event", lambda *_: self._close_prompt())
         w.connect("destroy", lambda *_: setattr(self, "_prompt", None))
         self._prompt = w
         w.show_all()
+        w.present()
         entry.grab_focus()
 
     def _close_prompt(self) -> bool:
