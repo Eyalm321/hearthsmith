@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# forge-sprite [start|stop|toggle|status|unlock|lock|size <mult>|move <x> <y>|corner <name>]
+# forge-sprite [start|stop|toggle|status|size <mult>|move <x> <y>|corner <name>]
 # The avatar runs as a user service; position/size live in ~/.config/forge/avatar.yaml and
 # hot-reload, so every command here just edits that file.
 set -euo pipefail
@@ -16,7 +16,7 @@ for kv in sys.argv[1:]:
     cfg[k] = yaml.safe_load(v)
 p.parent.mkdir(parents=True, exist_ok=True)
 p.write_text(yaml.safe_dump(cfg, sort_keys=True))
-print({k: cfg.get(k) for k in ("scale", "x", "y", "corner", "locked")})
+print({k: cfg.get(k) for k in ("scale", "x", "y", "corner", "sheet")})
 EOF
 }
 case "${1:-toggle}" in
@@ -25,10 +25,8 @@ case "${1:-toggle}" in
   status) systemctl --user status "$U" --no-pager ;;
   toggle) if systemctl --user is-active -q "$U"; then systemctl --user stop "$U"; echo "sprite hidden"
           else systemctl --user start "$U"; echo "sprite shown"; fi ;;
-  unlock) patch locked=false; echo "drag to move · scroll to resize · right-click to lock" ;;
-  lock)   patch locked=true ;;
   size)   patch "scale=${2:?size <multiplier, e.g. 1.5>}" ;;
-  move)   patch "x=${2:?move <x> <y>}" "y=${3:?move <x> <y>}" ;;
   corner) patch "corner=${2:?corner top-left|top-right|bottom-left|bottom-right}" x=__del__ y=__del__ ;;
+  move)   patch "x=${2:?move <x> <y>}" "y=${3:?move <x> <y>}" corner=__del__ ;;
   *) sed -n 2,3p "$0" >&2; exit 2 ;;
 esac

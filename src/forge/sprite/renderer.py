@@ -2,11 +2,9 @@
 plays the matching state. XWayland path (GDK_BACKEND=x11) because Mutter has no layer-shell; a
 GNOME Shell extension can replace this later — the state file contract stays.
 
-Position/size live in ~/.config/forge/avatar.yaml and hot-reload:
-  scale: 1.5          # multiplier on the pack cell (or px-per-pixel for the procedural sprite)
-  x: 1700  y: 900     # absolute; or  corner: bottom-right
-  locked: true        # true = click-through. false = draggable, scroll wheel resizes,
-                      # right-click locks again. Toggle with `forge-sprite unlock|lock`.
+Interaction: left click = talk to him, left hold+drag = move, right click = menu (size, corner,
+sheet, nag now, hide). Everything outside his body is click-through. Position/size persist in
+~/.config/forge/avatar.yaml (scale, x/y or corner, sheet) and hot-reload.
 
 Launch as the user service (forge-sprite start), never from an agent pane (cgroup cap + oomd).
 """
@@ -51,7 +49,11 @@ def load_avatar_cfg() -> dict:
 
 def save_avatar_cfg(patch: dict) -> None:
     cfg = load_avatar_cfg()
-    cfg.update(patch)
+    for k, v in patch.items():
+        if v is None:
+            cfg.pop(k, None)
+        else:
+            cfg[k] = v
     AVATAR_CFG.parent.mkdir(parents=True, exist_ok=True)
     AVATAR_CFG.write_text(yaml.safe_dump(cfg, sort_keys=True))
 
@@ -66,8 +68,9 @@ class Sprite(Gtk.Window):
         self.state, self.frame, self.text, self.text_until = "idle", 0, "", 0.0
         self._state_mtime = self._cfg_mtime = 0.0
         self.cfg: dict = {}
-        self.locked = True
         self._suppress_save = 0.0
+        self._press: tuple[int, int, int] | None = None  # x_root, y_root, time
+        self._dragging = False
 
         self.set_title("forge")
         self.set_decorated(False)
@@ -84,9 +87,12 @@ class Sprite(Gtk.Window):
         self.area = Gtk.DrawingArea()
         self.area.connect("draw", self.on_draw)
         self.add(self.area)
-        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.SCROLL_MASK)
-        self.connect("button-press-event", self.on_button)
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
+                        | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.SCROLL_MASK)
         self.connect("scroll-event", self.on_scroll)
+        self.connect("button-press-event", self.on_press)
+        self.connect("button-release-event", self.on_release)
+        self.connect("motion-notify-event", self.on_motion)
         self.connect("configure-event", self.on_configure)
         self.connect("realize", lambda *_: self._apply_cfg(force=True))
         GLib.timeout_add(250, self._tick)
@@ -120,7 +126,7 @@ class Sprite(Gtk.Window):
         self.set_size_request(w, h)
         self.resize(w, h)
         self._place(w, h)
-        self._set_locked(bool(self.cfg.get("locked", True)))
+        self._set_input_shape()
         self.area.queue_draw()
 
     def _place(self, w: int, h: int) -> None:
@@ -134,30 +140,109 @@ class Sprite(Gtk.Window):
         y = mon.y + (mon.height - h - 16 if "bottom" in corner else 16)
         self.move(x, y)
 
-    def _set_locked(self, locked: bool) -> None:
-        self.locked = locked
+    def _set_input_shape(self) -> None:
         win = self.get_window()
         if not win:
             return
         sw, sh = self.sprite_size()
-        # the body is always clickable (locked: click = talk; unlocked: drag); the rest passes through
+        # only his body takes input; bubble + margins pass clicks through
         win.input_shape_combine_region(
             cairo.Region(cairo.RectangleInt(0, self.bubble_h, sw, sh)), 0, 0)
 
-    # -- interaction (unlocked only) -----------------------------------------------------------
+    # -- interaction: click = talk, hold+drag = move, right click = menu -------------------------
 
-    def on_button(self, _w, ev) -> bool:
-        if self.locked:
-            if ev.button == 1:
-                self.open_prompt()
-            elif ev.button == 3:
-                save_avatar_cfg({"locked": False})
-            return True
+    DRAG_PX = 6
+
+    def on_press(self, _w, ev) -> bool:
         if ev.button == 1:
-            self.begin_move_drag(ev.button, int(ev.x_root), int(ev.y_root), ev.time)
+            self._press = (int(ev.x_root), int(ev.y_root), ev.time)
+            self._dragging = False
         elif ev.button == 3:
-            save_avatar_cfg({"locked": True})
+            self.open_menu(ev)
         return True
+
+    def on_motion(self, _w, ev) -> bool:
+        if self._press and not self._dragging and ev.state & Gdk.ModifierType.BUTTON1_MASK:
+            x0, y0, t0 = self._press
+            if abs(ev.x_root - x0) > self.DRAG_PX or abs(ev.y_root - y0) > self.DRAG_PX:
+                self._dragging = True
+                self.begin_move_drag(1, x0, y0, t0)
+        return True
+
+    def on_release(self, _w, ev) -> bool:
+        if ev.button == 1 and self._press and not self._dragging:
+            self.open_prompt()
+        self._press = None
+        return True
+
+    def on_configure(self, _w, ev) -> bool:
+        # persist a drag; ignore programmatic moves right after we placed ourselves
+        if time.time() > self._suppress_save:
+            x, y = self.get_position()
+            if (x, y) != (self.cfg.get("x"), self.cfg.get("y")):
+                self.cfg["x"], self.cfg["y"] = x, y
+                self.cfg.pop("corner", None)
+                save_avatar_cfg({"x": x, "y": y, "corner": None})
+                self._cfg_mtime = AVATAR_CFG.stat().st_mtime
+        return False
+
+    # -- menu ----------------------------------------------------------------------------------
+
+    def open_menu(self, ev) -> None:
+        m = Gtk.Menu()
+
+        def item(label, cb, submenu=None):
+            it = Gtk.MenuItem(label=label)
+            if submenu:
+                it.set_submenu(submenu)
+            else:
+                it.connect("activate", lambda *_: cb())
+            m.append(it)
+            return it
+
+        size = Gtk.Menu()
+        for lab, sc in (("Small", 0.75), ("Normal", 1.0), ("Large", 1.5), ("Huge", 2.0), ("Giant", 3.0)):
+            it = Gtk.CheckMenuItem(label=lab)
+            it.set_active(abs(self.scale - sc) < 0.05)
+            it.connect("activate", lambda _i, sc=sc: save_avatar_cfg({"scale": sc}))
+            size.append(it)
+        item("Size", None, size)
+
+        corner = Gtk.Menu()
+        for c in ("top-left", "top-right", "bottom-left", "bottom-right"):
+            it = Gtk.MenuItem(label=c.replace("-", " ").title())
+            it.connect("activate", lambda _i, c=c: save_avatar_cfg({"corner": c, "x": None, "y": None}))
+            corner.append(it)
+        item("Snap to corner", None, corner)
+
+        sheets = Gtk.Menu()
+        for p in sorted((Path.home() / "dev/forge/assets/sheets").glob("*.png")):
+            it = Gtk.CheckMenuItem(label=p.stem)
+            it.set_active(self.cfg.get("sheet") == p.stem)
+            it.connect("activate", lambda _i, p=p: self._switch_sheet(p))
+            sheets.append(it)
+        item("Appearance", None, sheets)
+
+        m.append(Gtk.SeparatorMenuItem())
+        item("Talk to him…", self.open_prompt)
+        item("Nag me now", lambda: self._systemctl("start", "forged.service"))
+        m.append(Gtk.SeparatorMenuItem())
+        item("Hide", lambda: self._systemctl("stop", "forge-sprite.service"))
+        m.show_all()
+        m.popup_at_pointer(ev)
+
+    def _switch_sheet(self, sheet: Path) -> None:
+        import subprocess
+        out = packmod.DEFAULT_PACK
+        subprocess.run([str(Path.home() / "dev/forge/.venv/bin/forge-sprite-slice"), str(sheet), str(out),
+                        "--cell", "96"], check=False, capture_output=True, timeout=60)
+        self.pack = packmod.load(out)
+        self._pix.clear()
+        save_avatar_cfg({"sheet": sheet.stem})
+
+    def _systemctl(self, verb: str, unit: str) -> None:
+        import subprocess
+        subprocess.Popen(["systemctl", "--user", verb, unit])
 
     # -- talk to him ---------------------------------------------------------------------------
 
@@ -219,23 +304,11 @@ class Sprite(Gtk.Window):
         return False
 
     def on_scroll(self, _w, ev) -> bool:
-        if self.locked:
-            return False
         step = 0.1 if ev.direction == Gdk.ScrollDirection.UP else -0.1 if \
             ev.direction == Gdk.ScrollDirection.DOWN else 0
         if step:
             save_avatar_cfg({"scale": round(max(0.3, min(6.0, self.scale + step)), 2)})
         return True
-
-    def on_configure(self, _w, ev) -> bool:
-        # persist a drag; ignore programmatic moves right after we placed ourselves
-        if not self.locked and time.time() > self._suppress_save:
-            x, y = self.get_position()
-            if (x, y) != (self.cfg.get("x"), self.cfg.get("y")):
-                self.cfg["x"], self.cfg["y"] = x, y
-                save_avatar_cfg({"x": x, "y": y})
-                self._cfg_mtime = AVATAR_CFG.stat().st_mtime
-        return False
 
     # -- animation -----------------------------------------------------------------------------
 
@@ -282,16 +355,6 @@ class Sprite(Gtk.Window):
                         cr.set_source_rgb(*self.palette[key])
                         cr.rectangle(x * s, oy + y * s, s + 0.5, s + 0.5)
                         cr.fill()
-        if not self.locked:
-            cr.set_source_rgba(1, 0.6, 0.18, 0.9)
-            cr.set_line_width(2)
-            cr.set_dash([6, 4])
-            cr.rectangle(1, oy + 1, sw - 2, sh - 2)
-            cr.stroke()
-            cr.set_dash([])
-            self._label(cr, 4, oy - 6, f"drag · scroll={self.scale:.1f}x · right-click locks")
-        elif not self.text:
-            pass
         if self.text:
             self._bubble(cr, sw + 8, oy + 8, BUBBLE_W - 12, self.text)
         return True
