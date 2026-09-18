@@ -51,6 +51,7 @@ KEYS = {"ctrl+l": "focus the address/search bar", "ctrl+t": "new browser tab", "
 URL_RE = re.compile(r"\b((?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?)", re.IGNORECASE)
 SITE_RE = re.compile(r"\b(?:go to|open|navigate to|visit)\s+([a-z0-9][a-z0-9-]{1,40})\b", re.IGNORECASE)
 QUOTED = re.compile(r"[\"'“”‘’]([^\"'“”‘’]{1,120})[\"'“”‘’]")
+MAX_RECHECKS = 3         # corrections driven by the verifier before admitting defeat
 BROWSERS = ("firefox", "chromium", "google-chrome", "chrome", "brave-browser")
 APPS = {"firefox": "firefox", "files": "nautilus", "nautilus": "nautilus", "terminal": "ptyxis",
         "settings": "gnome-control-center", "chrome": "google-chrome"}
@@ -247,7 +248,8 @@ KEYBOARD_NOTE = ("uinput types by pasting, so a page that listens for real keyst
                  "(most autocompletes) still won't see them")
 
 
-def _questions(els, wins, win, nav_url: str | None = None, hands: bool = False) -> dict:
+def _questions(els, wins, win, nav_url: str | None = None, hands: bool = False,
+               spent: dict | None = None) -> dict:
     """Speculative heads: every target head holds only elements that operation can act on."""
     clickable = [e for e in els if not e.fillable]
     fillable = [e for e in els if e.fillable]
@@ -296,6 +298,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
     filled: dict[str, str] = {}
     commits = 0
     verified = 0
+    spent: dict[str, int] = {}
     try:
         for _ in range(max_steps):
             pos = _pointer_pos() if (expected_ptr and not dry) else None
@@ -348,7 +351,8 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                 state["already_opened"] = visited
             state["uncommitted_control"] = (
                 pend.desc() if (pend := _pending_commit(els)) else "(none)")
-            a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win, nav_url, hands))
+            state["already_done"] = sorted(spent)[:12]
+            a = _jev(cfg.decide, json.dumps(state), _questions(els, wins, win, nav_url, hands, spent))
             op = a["operation"]["choice"] if "operation" in a else "stuck"
             if a["done"]["noul"] > 0.7 or op == "done":
                 # a visible Done/Search button means the work is staged, not finished
@@ -363,7 +367,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                                            cap_ms=1500)
                     res.steps.append(step)
                     continue
-                if cfg.desktop.verify and not dry and verified < 2:
+                if cfg.desktop.verify and not dry:
                     from forge.desktop import vision
                     rect = (win.x, win.y, win.w, win.h) if win else None
                     ok_seen, why = vision.verify(cfg.compose, goal, rect)
@@ -372,6 +376,9 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                         # the screen disagrees with the decider — keep going rather than
                         # reporting a success nobody can see
                         verified += 1
+                        if verified > MAX_RECHECKS:
+                            res.note = "the screen still doesn't show it"
+                            return res          # out of corrections: say so, don't claim done
                         res.steps.append(f"looked: {why[:80]}")
                         continue
                 res.ok = True
@@ -478,6 +485,7 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                     res.note = f"looping on {tgt.desc()}"
                     return res
                 last = (op, tgt.desc())
+                spent[tgt.desc()] = spent.get(tgt.desc(), 0) + 1
 
                 if not dry:
                     tgt = atspi.fresh(tgt, win)
