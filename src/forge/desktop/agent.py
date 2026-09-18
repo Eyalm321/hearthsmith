@@ -452,7 +452,17 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                     filled[tgt.name or tgt.role] = val
                     step = f"type into '{tgt.desc()}': {val!r}"
                     if not dry:
-                        if atspi.set_text(tgt, val):                    # quiet: no keyboard
+                        # A combobox/autocomplete on a modern page discards programmatic text:
+                        # AT-SPI reports success, the value looks right for a moment, then the
+                        # page's own handlers reset it. Type those for real when allowed.
+                        spa = tgt.role in ("combo box", "autocomplete")
+                        quiet_ok = False if (spa and ptr and kb) else atspi.set_text(tgt, val)
+                        if quiet_ok:
+                            time.sleep(0.25)           # let the page's handlers have their say
+                            got = atspi.read_text(tgt).strip()
+                            quiet_ok = bool(atspi.suggestions(win, val)) or (
+                                bool(got) and atspi.fold(val)[:10] in atspi.fold(got))
+                        if quiet_ok:
                             # an autocomplete wants its suggestion picked, not a button pressed
                             if picked := atspi.pick_suggestion(win, val):
                                 step += f" → {picked}"
@@ -466,9 +476,25 @@ def run(goal: str, cfg: config.Config | None = None, max_steps: int = 12, dry: b
                         elif ptr and kb:
                             ptr.click(tgt.cx, tgt.cy)
                             expected_ptr = (tgt.cx, tgt.cy)
-                            time.sleep(0.15)
-                            kb.type_text(val, enter=True)
-                            step += " + Enter (mouse)"
+                            time.sleep(0.2)
+                            kb.type_text(val)          # real keystrokes, so autocompletes fire
+                            time.sleep(0.2)
+                            # A combobox blanks its own accessible value while the dropdown is
+                            # open, so "did it take?" is answered by the suggestions, not the
+                            # field: matching options mean the page saw every keystroke.
+                            if picked := atspi.pick_suggestion(win, val):
+                                step += f" → {picked}"
+                            else:
+                                # a date field commits on blur, so its value can lag the
+                                # keystrokes — give it a beat before calling it a failure
+                                got = ""
+                                for _ in range(6):
+                                    got = atspi.read_text(tgt).strip()
+                                    if got:
+                                        break
+                                    time.sleep(0.1)
+                                kb.tap("enter")
+                                step += " + Enter" if got else " + Enter (field read back empty)"
                         else:
                             res.note = (f"'{tgt.desc()}' ignored the quiet fill (the page wants "
                                         "real typing) — rerun with --hands")

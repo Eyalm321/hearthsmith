@@ -301,19 +301,28 @@ def read_text(el: Element, limit: int = 120) -> str:
         return ""
 
 
-def pick_suggestion(win: Window, typed: str, cap_ms: int = 900) -> str | None:
+def fold(s: str) -> str:
+    """Compare text the way a person would: 'Zurich' should match 'Zürich, Switzerland'."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", s.lower())
+                   if not unicodedata.combining(c))
+
+
+def suggestions(win: Window, typed: str, limit: int = 140) -> list[Element]:
+    want = fold(typed.strip())
+    return [e for e in elements(win, limit=limit)
+            if e.role in ("list item", "menu item", "option") and e.name and want in fold(e.name)]
+
+
+def pick_suggestion(win: Window, typed: str, cap_ms: int = 1200) -> str | None:
     """After filling an autocomplete, choose the option it offers. Waits briefly for the list to
     appear, then activates the best match — the quiet equivalent of arrow-down + Enter."""
     import time as _t
-    want = typed.lower().strip()
     deadline = _t.time() + cap_ms / 1000
     while _t.time() < deadline:
         _t.sleep(0.1)
-        opts = [e for e in elements(win, limit=120)
-                if e.role in ("list item", "menu item", "option") and e.name]
-        hit = next((e for e in opts if want in e.name.lower()), None)
-        if hit and do_action(hit):
-            return hit.name[:60]
+        if (opts := suggestions(win, typed)) and do_action(opts[0]):
+            return opts[0].name[:60]
     return None
 
 
