@@ -19,12 +19,19 @@ if [ ! -f ~/.config/forge/env ]; then
   chmod 600 ~/.config/forge/env
 fi
 
+# sprite pack: slice the shipped sheet into ~/.config/forge/pack unless one already exists
+# (FORGE_SHEET=blacksmith-b for the stockier dwarf cut)
+if [ ! -f ~/.config/forge/pack/manifest.json ]; then
+  "$ROOT/.venv/bin/forge-sprite-slice" "$ROOT/assets/sheets/${FORGE_SHEET:-blacksmith-a}.png" ~/.config/forge/pack --cell 96
+fi
+
 # systemd user units: heartbeat timer + avatar service
 mkdir -p ~/.config/systemd/user
 cp "$HERE/forged.service" "$HERE/forged.timer" "$HERE/forge-sprite.service" ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now forged.timer
-systemctl --user enable --now forge-sprite.service
+systemctl --user enable forge-sprite.service
+systemctl --user restart forge-sprite.service
 
 # app launcher + icon (+ autostart is the service's WantedBy=graphical-session.target)
 mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps

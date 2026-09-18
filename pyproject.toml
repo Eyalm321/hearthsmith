@@ -19,6 +19,7 @@ forge = "forge.cli:main"
 forge-mcp = "forge.mcp_server:main"
 forge-sprite-preview = "forge.sprite.preview:main"
 forge-sprite-icon = "forge.sprite.preview:icon_main"
+forge-sprite-slice = "forge.sprite.slice:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
