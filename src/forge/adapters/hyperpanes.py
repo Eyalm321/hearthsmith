@@ -138,6 +138,42 @@ class Hyperpanes:
                 else {"output": r.text}
             return body.get("output") or body.get("text") or ""
 
+    def last_answer(self, pane_id: str, max_chars: int = 1600) -> str:
+        """The agent's closing answer. A pane is a repainting TUI, not a transcript: the same
+        sentence appears half-drawn several times as it streams, and spinner frames land in the
+        middle of words. So: keep line structure, drop the chrome, prefer whatever follows the
+        last "Answer:" marker, and keep the longest version of each repeated line."""
+        import re as _re
+        # The rendered screen is the terminal's own reconstruction — accurate. The raw buffer is
+        # a stream of partial repaints, where a word can lose characters to an overdraw, so it is
+        # only worth reading when the answer has already scrolled out of view.
+        rendered = self.screen(pane_id, tail=80)
+        raw = rendered
+        if not _re.search(r"(?im)^\s*[●⎿│ ]*answer\b\s*[:\-]", rendered):
+            with self._client() as c:
+                r = c.get(f"/panes/{pane_id}/output", params={"tail": 30000})
+                raw = r.json().get("output", "") if r.status_code == 200 else rendered
+        clean = _re.sub(r"\x1b\][^\x07\x1b]*(\x07|\x1b\\)?", "", raw)
+        clean = _re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", clean)
+        clean = _re.sub(r"(?:Burrowing|Churning|Crunched|Cerebrating|Quantumizing|Pondering|"
+                        r"Thinking)[.…]*", " ", clean)
+        noise = _re.compile(r"^[\s─│╭╰┌┐└┘├┤┬┴┼·✢✽✻✶*]*$|auto mode|shift\+tab|ctrl\+|"
+                            r"esc to interrupt|tokens|^\s*⏵|token usage|for shortcuts",
+                            _re.IGNORECASE)
+        lines = []
+        for ln in clean.splitlines():
+            t = ln.rstrip().lstrip("●❯⎿│ ").strip()
+            if not t or noise.search(ln) or len(t) < 3:
+                continue
+            # a streamed line is redrawn as it grows; keep the fullest form, not the fragments
+            if lines and (t.startswith(lines[-1][:20]) or lines[-1].startswith(t[:20])):
+                lines[-1] = t if len(t) > len(lines[-1]) else lines[-1]
+            else:
+                lines.append(t)
+        marked = [i for i, t in enumerate(lines) if _re.match(r"(?i)^answer\b\s*[:\-]", t)]
+        tail = lines[marked[-1]:] if marked else lines[-14:]
+        return "\n".join(tail)[:max_chars].strip()
+
     # -- speak -----------------------------------------------------------------------------
 
     def message(self, pane_id: str, text: str) -> bool:

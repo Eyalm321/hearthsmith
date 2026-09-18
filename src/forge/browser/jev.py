@@ -10,9 +10,11 @@ from dataclasses import dataclass, field
 from forge import config
 
 # Nothing here is solvable by an agent: park the tab and hand it over.
-GATES = ("verify you are human", "i'm not a robot", "complete the captcha", "captcha",
-         "unusual traffic", "enter the code we sent", "verification code sent",
-         "two-factor", "confirm your identity", "solve this puzzle")
+# Phrases a challenge page actually uses. The bare word "captcha" is not one of them — it shows
+# up in privacy policies and cookie banners, and treating that as a wall stops honest pages.
+GATES = ("verify you are human", "i'm not a robot", "complete the captcha",
+         "unusual traffic from your computer", "enter the code we sent",
+         "confirm your identity to continue", "solve this puzzle", "checking your browser before")
 
 
 @dataclass
@@ -23,6 +25,7 @@ class Result:
     title: str = ""
     note: str = ""
     elapsed_ms: int = 0
+    page_text: str = ""      # what was on the page when it finished — the raw material for an answer
     decide_ms: list[float] = field(default_factory=list)
     seen: str = ""
 
@@ -208,10 +211,12 @@ def _run_once(goal: str, url: str | None = None, cfg: config.Config | None = Non
                 res.decide_ms = [h["latency_ms"] for h in state.get("history", [])
                                  if h.get("latency_ms") is not None]
                 page = state.get("page") or {}
+                if txt := page.get("text"):
+                    res.page_text = txt[:12000]
                 res.url = page.get("url") or state.get("url") or res.url
                 res.title = page.get("title") or state.get("title") or res.title
                 page_txt = (page.get("text") or "").lower()[:4000]
-                if any(g in page_txt for g in GATES):
+                if any(g in page_txt for g in GATES) and len(page_txt) < 2500:
                     res.note = "your turn — it needs a human (captcha / verification)"
                     say.failed("Your turn: it needs a human check. Say 'continue' when done.")
                     _keep_tab[0] = True      # leave it exactly where you have to take over

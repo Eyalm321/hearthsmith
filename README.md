@@ -29,6 +29,12 @@ forge state            # the exact paragraph the decider sees
 forged --once --dry    # decide + compose, deliver nothing
 ```
 
+Ask him a question and he answers it rather than reporting that a page was opened. One page
+holds it ("what does the P2S cost") → he opens the page and reads it, a couple of seconds, and
+says so plainly when the page doesn't actually contain it. It needs comparing sources ("what do
+people charge on average", "compare X and Y") → he puts an agent on it in its own pane and brings
+the answer back on the next heartbeat, attached to the task.
+
 Everything he is asked to do is recorded: the goal, which body ran it, whether it worked, the
 steps he took with their confidence and decision latency, and what the verifier saw. `forge runs`
 lists them, `forge runs <id>` shows one. Values you typed into his dialog are stored as

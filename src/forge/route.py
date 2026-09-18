@@ -24,6 +24,7 @@ from pathlib import Path
 import httpx
 from typesafe_sdk import Choice, Noul
 
+from forge import answer as answer_mod
 from forge import config
 from forge.adapters import markdown
 from forge.adapters.hyperpanes import Hyperpanes, Snapshot
@@ -33,6 +34,8 @@ from forge.store import Store
 
 INTENTS = {
     "add": "a new task or reminder to remember for later (not to be done right now by an agent)",
+    "research": "a question that needs looking things up and comparing sources before it can be "
+                "answered honestly — an average, a going rate, a comparison, the state of a field",
     "browse": "something to do in a web browser: open a site, search, click through, read a page",
     "desktop": "something to do in another app on screen: files, settings, a window, a menu, a dialog",
     "spawn": "start a NEW pane/agent for this work — the user asked to open one, or the work "
@@ -42,7 +45,7 @@ INTENTS = {
     "done": "the user is saying an existing task is finished",
     "snooze": "the user wants to be left alone about an existing task for a while",
     "nag": "the user is asking what they should be doing / wants a status check",
-    "ask": "a question or remark that just needs an answer, nothing to track",
+    "ask": "a remark, or a question answerable from what you already know — no looking anything up",
 }
 DUE = ["no deadline", "today", "tomorrow", "within this week", "next week or later"]
 DUE_SECS = [None, 12 * 3600, 36 * 3600, 5 * 86400, 10 * 86400]
@@ -184,15 +187,43 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         return Reply("add", f"Noted '{text}'. (decider down: {type(e).__name__})", t.id)
 
     raw = {"answers": a}
+    # A question about the world is not a question for him: if it wants a fact that lives on a
+    # page, go and read the page instead of answering from memory. This overrides the intent
+    # whenever the alternative is him talking (or a task match that never happened) — those
+    # branches fall through to the same shrug.
+    researching = intent in ("research", "ask") and answer_mod.wants_research(text)
+    if not researching and intent in ("research", "ask", "nag", "done", "snooze") and (
+            answer_mod.needs_lookup(text) or intent == "research"):
+        # One page holds it, so read the page: "research" from the decider covers everything
+        # from a price to a literature review, and only the latter is worth an agent.
+        intent = "browse"
+    if researching:
+        intent = "spawn"          # sent to an agent below, and watched so the answer comes back
+
     if intent == "browse":
         # Inside a page a DOM snapshot beats the accessibility tree; his Chrome handles the web.
         from forge.browser import jev
         if jev.available():
             started = int(time.time())
-            j = jev.run(text, cfg=cfg)
-            store.record_run(text, "browser", j.ok, j.steps, note=j.note,
+            # For a question the job is to *reach* the page that answers it; left as an open
+            # goal the agent keeps clicking and eventually types the question into a search box.
+            looking_up = answer_mod.is_question(text)
+            goal = (f"Open the page that actually answers this and stop there. A list of search "
+                    f"results is not an answer — click through to the real page first. "
+                    f"Question: {text}" if looking_up else text)
+            j = jev.run(goal, cfg=cfg)
+            answered = (answer_mod.from_page(cfg, text, j.page_text, j.url)
+                        if looking_up else None)
+            store.record_run(text, "browser", bool(j.ok or answered),
+                             j.steps + ([f"answered: {answered[:160]}"] if answered else []),
+                             note="" if answered else j.note,
                              target=j.url or j.title, decide_ms=j.decide_ms, seen=j.seen,
                              started_at=started)
+            # Answer from whatever page it reached — a run that ended untidily on the right page
+            # still holds the answer, and reporting the stumble instead would be perverse.
+            if answered:
+                return Reply(intent, answered, raw={**raw, "steps": j.steps, "ms": j.elapsed_ms,
+                                                    "source": j.url})
             if j.ok:
                 return Reply(intent, f"Done — {j.title or j.url or 'in Chrome'}.",
                              raw={**raw, "steps": j.steps, "ms": j.elapsed_ms})
@@ -238,6 +269,9 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
 
     if intent == "spawn":
         brief = _brief(text)
+        if researching:
+            brief = (f"{text}\n\nResearch this properly, then finish with a short, direct "
+                     "answer in two or three sentences — the number or conclusion first.")
         # absolute path: the GUI app's PATH is the session's, not the shell's, so a bare
         # "claude" silently falls back to a plain shell pane
         exe = shutil.which("claude") or str(Path.home() / ".local/bin/claude")
@@ -255,6 +289,10 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
                 store.record_run(brief, "spawn", True,
                                  [f"opened a pane in {cwd}", "answered the folder-trust prompt",
                                   "typed the assignment"], task_id=t.id, target=pane_id)
+                if researching:
+                    store.watch(pane_id, text, t.id)
+                    return Reply("research", "Put an agent on it — I'll bring the answer back "
+                                 "when it lands.", t.id, pane_id, raw)
                 return Reply(intent, f"Opened a pane in {where} and set it on it: {_label(brief)}.",
                              t.id, pane_id, raw)
             return Reply(intent, "Opened a pane — it's still starting, so I left the brief for "

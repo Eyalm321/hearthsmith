@@ -52,6 +52,16 @@ CREATE TABLE IF NOT EXISTS runs (
   seen      TEXT NOT NULL DEFAULT ''   -- what the verifier saw, when it looked
 );
 CREATE INDEX IF NOT EXISTS runs_at ON runs(at DESC);
+-- Work handed to an agent that will take minutes. The heartbeat checks these and brings the
+-- answer back, so "research X" ends with an answer rather than a pane you have to remember.
+CREATE TABLE IF NOT EXISTS watches (
+  pane_id   TEXT PRIMARY KEY,
+  task_id   TEXT,
+  question  TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  last_hash TEXT NOT NULL DEFAULT '',
+  stable_since INTEGER
+);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 """
 
@@ -184,6 +194,32 @@ class Store:
         row = self.db.execute("SELECT * FROM runs WHERE id=? OR id LIKE ?",
                               (run_id, run_id + "%")).fetchone()
         return dict(row) if row else None
+
+    # -- watches ---------------------------------------------------------------------------
+
+    def watch(self, pane_id: str, question: str, task_id: str | None = None) -> None:
+        self.db.execute("INSERT OR REPLACE INTO watches (pane_id,task_id,question,started_at) "
+                        "VALUES (?,?,?,?)", (pane_id, task_id, question, int(time.time())))
+
+    def watches(self) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM watches ORDER BY started_at")]
+
+    def touch_watch(self, pane_id: str, digest: str) -> int:
+        """Remember what the pane looked like; returns how long it has looked the same."""
+        row = self.db.execute("SELECT last_hash, stable_since FROM watches WHERE pane_id=?",
+                              (pane_id,)).fetchone()
+        now = int(time.time())
+        if row is None:
+            return 0
+        if row["last_hash"] != digest:
+            self.db.execute("UPDATE watches SET last_hash=?, stable_since=? WHERE pane_id=?",
+                            (digest, now, pane_id))
+            return 0
+        since = row["stable_since"] or now
+        return now - since
+
+    def unwatch(self, pane_id: str) -> None:
+        self.db.execute("DELETE FROM watches WHERE pane_id=?", (pane_id,))
 
     # -- nag log + kv ----------------------------------------------------------------------
 

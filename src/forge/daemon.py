@@ -51,12 +51,53 @@ def in_quiet_hours(cfg: config.NagCfg) -> bool:
     return (start <= h or h < end) if start > end else (start <= h < end)
 
 
+def collect_research(cfg: config.Config, store: Store, hp: Hyperpanes,
+                     settle_s: int = 45) -> list[dict]:
+    """Bring back answers from agents that were sent off to research something. A pane counts as
+    finished when it is idle and its screen has stopped changing — an agent mid-thought repaints
+    constantly, so stillness is the signal."""
+    import hashlib
+    done = []
+    for w in store.watches():
+        snap = hp.snapshot(with_screens=False)
+        pane = next((p for p in (snap.panes if snap else []) if p.id == w["pane_id"]), None)
+        if pane is None:                       # closed before it answered
+            store.unwatch(w["pane_id"])
+            continue
+        screen = hp.screen(w["pane_id"], tail=60)
+        digest = hashlib.sha1(screen.encode()).hexdigest()[:16]
+        still = store.touch_watch(w["pane_id"], digest)
+        if pane.activity == "busy" or still < settle_s:
+            continue
+        answer = hp.last_answer(w["pane_id"])
+        if len(answer) < 40:
+            continue
+        store.unwatch(w["pane_id"])
+        if w["task_id"]:
+            store.set_state(w["task_id"], "done")
+            store.db.execute("UPDATE tasks SET notes=notes||? WHERE id=?",
+                             (f"\n\nanswer: {answer}", w["task_id"]))
+        store.record_run(w["question"], "research", True, ["asked an agent", "collected its answer"],
+                         task_id=w["task_id"], target=w["pane_id"], started_at=w["started_at"])
+        done.append({"question": w["question"], "answer": answer, "pane": w["pane_id"]})
+    return done
+
+
 def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = False,
               force: bool = False) -> dict:
     """force = the user asked ("Nag me now", `forge say "what should I do"`): skip the quiet-hours
     and min-gap gates and always say something, even if Jev would have stayed quiet."""
-    state, tasks = build_state(store, hp, cfg)
     sprite = SpriteSink(cfg.sprite_path)
+    # an answer you asked for outranks a reminder you didn't
+    for found in collect_research(cfg, store, hp):
+        text = f"Your answer on '{found['question'][:60]}': {found['answer'][:400]}"
+        if not dry:
+            if not sprite.send(text, "soon", None):
+                NotifySink().send(text, "soon", None)
+            store.log_nag(found.get("task_id"), "research", "soon", text, "{}")
+        return {"answered": found["question"], "answer": found["answer"][:400]}
+
+    state, tasks = build_state(store, hp, cfg)
     last = store.last_nag_at()
 
     if not force:

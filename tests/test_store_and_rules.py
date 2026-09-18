@@ -104,3 +104,19 @@ def test_desktop_refuses_to_invent_a_password(monkeypatch, tmp_path):
         assert "needs you" in str(e)
     else:
         raise AssertionError("a password must never be generated")
+
+
+def test_question_routing():
+    from forge.answer import is_question, needs_lookup, wants_research
+    assert needs_lookup("what does the p2s cost")            # one page holds it
+    assert not wants_research("what does the p2s cost")
+    assert wants_research("how much do engineers charge on average")
+    assert wants_research("compare vikunja and planka")      # not phrased as a question
+    assert not needs_lookup("find one-way flights to oslo")  # an errand, not a question
+    assert is_question("is proton free?")
+
+
+def test_answer_refuses_when_the_page_does_not_say(tmp_path):
+    from forge import config as c
+    from forge.answer import from_page
+    assert from_page(c.Config(db_path=tmp_path / "t.db"), "what does it cost", "") is None
