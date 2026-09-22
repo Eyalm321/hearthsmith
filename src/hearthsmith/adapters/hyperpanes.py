@@ -31,6 +31,11 @@ class Pane:
     activity: str  # busy | idle
     tab: str
     screen: str = ""
+    meta: dict = field(default_factory=dict)  # role/parent/goal/owner — hierarchy data, not API
+
+    def mine(self) -> bool:
+        """Spawned by the smith (route "spawn", research). Never the user's own interactive panes."""
+        return self.meta.get("owner") == "hearthsmith"
 
 
 @dataclass
@@ -115,7 +120,7 @@ class Hyperpanes:
                     for p in t.get("panes", []):
                         pane = Pane(id=p["id"], label=p.get("label", ""), cwd=p.get("cwd"),
                                     status=p.get("status", ""), activity=p.get("activity", ""),
-                                    tab=t.get("title", ""))
+                                    tab=t.get("title", ""), meta=p.get("meta") or {})
                         if with_screens and pane.activity == "busy":
                             r = c.get(f"/panes/{pane.id}/output",
                                       params={"mode": "screen", "tail": self.tail_lines})
@@ -205,10 +210,11 @@ class Hyperpanes:
 
     def new_pane(self, command: str | None = None, args: list[str] | None = None,
                  cwd: str | None = None, label: str | None = None,
-                 window_id: int = 0) -> str | None:
+                 window_id: int = 0, meta: dict | None = None) -> str | None:
         """Open a pane and return its id. `command` is what runs in it (e.g. "claude"); the spec
-        fields must be nested under "pane" or the API rejects the call."""
-        spec: dict = {}
+        fields must be nested under "pane" or the API rejects the call. Every pane he opens is
+        stamped owner=hearthsmith so he can later tell his own from yours."""
+        spec: dict = {"meta": {"owner": "hearthsmith", **(meta or {})}}
         for k, v in (("command", command), ("args", args), ("cwd", cwd), ("label", label)):
             if v:
                 spec[k] = v
@@ -223,6 +229,14 @@ class Hyperpanes:
             if isinstance(res, dict):
                 res = res.get("paneId") or res.get("id")
             return res if isinstance(res, str) else None
+
+    def press(self, pane_id: str, *keys: str) -> bool:
+        """Named keys only (tab, enter, escape…): no text can be typed this way, which is why
+        answering a dialog or accepting a pane's own suggestion is allowed while `/input` with
+        text stays off."""
+        with self._client() as c:
+            r = c.post(f"/panes/{pane_id}/input", json={"keys": list(keys)})
+            return r.status_code < 300
 
     def close_pane(self, pane_id: str) -> bool:
         with self._client() as c:

@@ -130,8 +130,15 @@ permission is pending). He watches idle panes for one, and once it has sat uncha
 `hyperpanes.suggestion_settle_s` (20s — the screen is plain text, so ghost text and a line you
 are typing look the same) he tells you once: *"'canora-sync' wants to: run the tests. Yes or
 no?"*, with how many sibling panes in that project are still busy. `hearthsmith suggestions`
-lists them. Observe-only for now (`hyperpanes.suggestions: observe | off`): accepting on your
-behalf, and holding off while a spec agent is still writing, is the next stage.
+lists them. That is `hyperpanes.suggestions: observe` (or `off`).
+
+`accept` goes further, in panes **he** spawned only (`meta.owner=hearthsmith` — yours are only
+ever reported): Jev judges each settled suggestion *accept / wait / dismiss / ask*, with the
+pane's last answer and its siblings' state (same `meta.goal` when the goals org stamps one, else
+same directory). Accept = Tab, Enter — named keys, no text can go in that way — pressed only if
+the input line still reads what was judged (the pane regenerates suggestions while they sit).
+Busy siblings mean wait, no call made. Anything irreversible comes back as dismiss or ask; ask
+is the fallback when the decider is down. Every verdict is a run (`hearthsmith runs`).
 
 ## Two bodies, one brain
 

@@ -54,6 +54,11 @@ class HyperpanesCfg:
     # one that has sat unchanged for `suggestion_settle_s`.
     suggestions: str = "observe"
     suggestion_settle_s: int = 20
+    # "accept": Jev judges each settled suggestion — accept / wait / dismiss / ask you — and he
+    # presses Tab+Enter himself. Only in panes he spawned (meta.owner=hearthsmith), never in one
+    # you are typing in, and never while a sibling of the same goal is still working.
+    # Requires suggestions: accept. Each press is a recorded run.
+    suggestion_accept_min_p: float = 0.7
     # `hearthsmith say` routed to a pane: type into the agent's prompt when it is idle (it acts now);
     # a busy pane gets an inbox message instead (it sees it on its next read_messages)
     say_types_into_idle_pane: bool = True

@@ -83,12 +83,53 @@ def collect_research(cfg: config.Config, store: Store, hp: Hyperpanes,
     return done
 
 
+SUGGEST = {
+    "accept": "the suggested next step is the obvious continuation of the work and safe to run "
+              "unattended; nothing else needs to finish first",
+    "wait": "sensible, but a sibling pane on the same goal is still working and should finish "
+            "first, or the pane itself might still change its mind",
+    "dismiss": "off-track, redundant, or something the user clearly would not want done "
+               "automatically (deploys, deletes, pushes, spending, anything irreversible)",
+    "ask": "worth doing but the user should say yes first",
+}
+
+
+def _judge(cfg: config.Config, sg: dict, siblings: list) -> tuple[str, float]:
+    """Jev's call on one settled suggestion. Falls back to `ask` on any backend trouble — the
+    conservative answer is the one that only costs the user a sentence."""
+    from typesafe_sdk import Choice
+
+    from hearthsmith.route import _jev
+    sib = "; ".join(f"{q.label}: {'busy' if q.activity == 'busy' else 'idle'}"
+                    f"{' [' + q.meta.get('role') + ']' if q.meta.get('role') else ''}" for q in siblings) or "none"
+    state = (f"Local time {datetime.now():%A %H:%M}.\n"
+             f"An AI agent pane '{sg['label']}' (role {sg.get('role') or 'unknown'}, goal "
+             f"{sg.get('goal') or 'unknown'}, project {sg['project'] or 'unknown'}) finished a turn "
+             f"and now proposes as its own next prompt: \"{sg['text']}\".\n"
+             f"It has been sitting unaccepted for {sg['age']}s.\n"
+             f"Sibling panes on the same goal: {sib}.\n"
+             f"Last thing the pane said: {sg.get('last_answer', '')[:600]}")
+    try:
+        a = _jev(cfg.decide, state, {"verdict": Choice(
+            instructions="What should happen to this suggested next prompt?", criteria=SUGGEST)})
+        v = a["verdict"]["choice"]
+        return v, float(a["verdict"].get("probabilities", {}).get(v, 0.0))
+    except Exception as e:  # noqa: BLE001 — decider down: ask, don't guess
+        log.warning("suggestion judge failed: %s", e)
+        return "ask", 0.0
+
+
 def collect_suggestions(cfg: config.Config, store: Store, hp: Hyperpanes) -> list[dict]:
     """Notice a Claude pane offering its own next prompt (ghost text after a turn) and, once it
-    has sat there unchanged long enough to not be you mid-sentence, say so — once per suggestion.
-    Observe-only: nothing is typed into any pane. Returns the ones newly worth reporting."""
+    has sat there unchanged long enough to not be you mid-sentence, deal with it once.
+
+    observe: tell you. accept: in panes he spawned, Jev judges accept/wait/dismiss/ask; accept
+    is Tab+Enter (named keys — no text can go in this way), after re-reading the input line so a
+    suggestion the pane regenerated meanwhile is never the one pressed. Your own panes are only
+    ever reported. Returns the ones that need your ear."""
     snap = hp.snapshot(with_screens=False)
-    if not snap or cfg.hyperpanes.suggestions == "off":
+    mode = cfg.hyperpanes.suggestions
+    if not snap or mode == "off":
         return []
     settle = cfg.hyperpanes.suggestion_settle_s
     live = set()
@@ -101,16 +142,52 @@ def collect_suggestions(cfg: config.Config, store: Store, hp: Hyperpanes) -> lis
             continue
         live.add(pane.id)
         proj = (snap.project_for_cwd(pane.cwd) or {}).get("name", "")
-        # "same feature" today = same project; a pane still working there is a reason to wait
-        siblings_busy = sum(1 for q in snap.panes
-                            if q.id != pane.id and q.activity == "busy" and q.cwd == pane.cwd)
+        # "same feature" = same goal when the org stamps one, else same project dir
+        goal = pane.meta.get("goal")
+        siblings = [q for q in snap.panes if q.id != pane.id
+                    and ((goal and q.meta.get("goal") == goal) or (not goal and q.cwd == pane.cwd))]
+        siblings_busy = sum(1 for q in siblings if q.activity == "busy")
         row = store.see_suggestion(pane.id, text, pane.label, proj, siblings_busy)
-        if row["state"] == "seen" and row["age"] >= settle:
+        if row["state"] != "seen" or row["age"] < settle:
+            continue
+        row.update(siblings_busy=siblings_busy, role=pane.meta.get("role"), goal=goal)
+        if mode != "accept" or not pane.mine():
             store.set_suggestion_state(pane.id, "reported")
             store.record_run(f"{pane.label} suggests: {text}", "suggestion", True,
-                             [f"sat {row['age']}s", f"{siblings_busy} sibling(s) busy in {proj or 'same dir'}"],
+                             [f"sat {row['age']}s", f"{siblings_busy} sibling(s) busy", "reported"],
                              target=pane.id)
-            fresh.append({**row, "siblings_busy": siblings_busy})
+            fresh.append(row)
+            continue
+        if siblings_busy:
+            continue  # wait, silently; re-judged next heartbeat once they settle
+        row["last_answer"] = hp.last_answer(pane.id)
+        verdict, p = _judge(cfg, row, siblings)
+        steps = [f"sat {row['age']}s", f"jev: {verdict} p={p:.2f}"]
+        if verdict == "accept" and p >= cfg.hyperpanes.suggestion_accept_min_p:
+            # the pane may have regenerated it since we read; press only what we judged
+            if hp.input_line(pane.id) != text:
+                steps.append("changed under us; not pressed")
+                store.drop_suggestion(pane.id)
+                store.record_run(f"{pane.label} suggests: {text}", "suggestion", False, steps, target=pane.id)
+                continue
+            ok = hp.press(pane.id, "tab") and hp.press(pane.id, "enter")
+            steps.append("pressed tab, enter" if ok else "press failed")
+            store.set_suggestion_state(pane.id, "accepted" if ok else "seen")
+            store.record_run(f"{pane.label} suggests: {text}", "suggestion", ok, steps, target=pane.id)
+            continue
+        if verdict == "dismiss":
+            # leave it; the pane's next turn or the user's next key clears it. Nothing pressed:
+            # a dismiss keystroke would be typing into their box.
+            store.set_suggestion_state(pane.id, "dismissed")
+            store.record_run(f"{pane.label} suggests: {text}", "suggestion", True, steps, target=pane.id)
+            continue
+        if verdict == "wait":
+            store.record_run(f"{pane.label} suggests: {text}", "suggestion", True, steps, target=pane.id)
+            continue
+        store.set_suggestion_state(pane.id, "reported")
+        store.record_run(f"{pane.label} suggests: {text}", "suggestion", True, [*steps, "asked you"],
+                         target=pane.id)
+        fresh.append(row)
     # a suggestion that vanished (accepted, dismissed, pane closed) is not ours to remember
     for old in store.suggestions():
         if old["pane_id"] not in live:

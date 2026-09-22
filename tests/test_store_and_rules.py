@@ -134,3 +134,10 @@ def test_suggestion_age_resets_when_text_changes(tmp_path):
     assert s.suggestions()[0]["state"] == "reported"
     s.drop_suggestion("p1")
     assert s.suggestions() == []
+
+
+def test_only_his_own_panes_are_his():
+    from hearthsmith.adapters.hyperpanes import Pane
+    yours = Pane("a", "canora-sync", "/x", "running", "idle", "t")
+    his = Pane("b", "worker", "/x", "running", "idle", "t", meta={"owner": "hearthsmith", "role": "impl"})
+    assert not yours.mine() and his.mine()
