@@ -138,6 +138,16 @@ class Hyperpanes:
                 else {"output": r.text}
             return body.get("output") or body.get("text") or ""
 
+    def input_line(self, pane_id: str) -> str:
+        """What sits in a Claude pane's input box: "" at an empty prompt, else the text after ❯.
+        Cannot tell ghost text (the pane's own suggested next prompt) from a line the user is
+        typing — the screen is plain text — so callers judge by how long it stays unchanged."""
+        screen = self.screen(pane_id, tail=8)
+        lines = [ln for ln in screen.splitlines() if ln.lstrip().startswith("❯")]
+        if not lines:
+            return ""
+        return lines[-1].lstrip()[1:].replace("\xa0", " ").strip()
+
     def last_answer(self, pane_id: str, max_chars: int = 1600) -> str:
         """The agent's closing answer. A pane is a repainting TUI, not a transcript: the same
         sentence appears half-drawn several times as it streams, and spinner frames land in the

@@ -48,6 +48,12 @@ class HyperpanesCfg:
     # off until something drains the queue (`hyperpanes worker --queue hearthsmith -- ...`); otherwise
     # a "delegate" decision marks the task delegated and nothing ever happens
     delegate_enabled: bool = False
+    # A Claude pane offers its own next prompt as ghost text after a turn. "observe" = he notices
+    # and tells you; "off" = ignore. Accepting on your behalf is a later stage: the screen read is
+    # plain text, so a suggestion and a line you half-typed look the same — he only ever reports
+    # one that has sat unchanged for `suggestion_settle_s`.
+    suggestions: str = "observe"
+    suggestion_settle_s: int = 20
     # `hearthsmith say` routed to a pane: type into the agent's prompt when it is idle (it acts now);
     # a busy pane gets an inbox message instead (it sees it on its next read_messages)
     say_types_into_idle_pane: bool = True

@@ -11,7 +11,9 @@ compose:
 hyperpanes:
   allow_pane_input: false          # /input is arbitrary command exec; keep off
   delegate_queue: hearthsmith
-  delegate_enabled: false      # turn on once a worker drains the queue
+  delegate_enabled: false
+  suggestions: observe             # a pane's ghost-text next prompt: observe (tell you) | off
+  suggestion_settle_s: 20          # unchanged this long before he mentions it      # turn on once a worker drains the queue
 desktop:
   hands: false                 # true = he may use the real mouse/keyboard (exclusive)
   verify: true                 # one screenshot + vision check before reporting success

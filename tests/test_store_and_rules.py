@@ -120,3 +120,17 @@ def test_answer_refuses_when_the_page_does_not_say(tmp_path):
     from hearthsmith import config as c
     from hearthsmith.answer import from_page
     assert from_page(c.Config(db_path=tmp_path / "t.db"), "what does it cost", "") is None
+
+
+def test_suggestion_age_resets_when_text_changes(tmp_path):
+    s = Store(tmp_path / "t.db")
+    a = s.see_suggestion("p1", "fix add()", "sugg", "sugg", 0)
+    assert a["age"] == 0 and a["state"] == "seen"
+    s.db.execute("UPDATE suggestions SET first_seen=first_seen-30 WHERE pane_id='p1'")
+    assert s.see_suggestion("p1", "fix add()", "sugg", "sugg", 1)["age"] >= 30
+    b = s.see_suggestion("p1", "run the test", "sugg", "sugg", 1)   # pane regenerated it
+    assert b["age"] == 0 and b["siblings_busy"] == 1
+    s.set_suggestion_state("p1", "reported")
+    assert s.suggestions()[0]["state"] == "reported"
+    s.drop_suggestion("p1")
+    assert s.suggestions() == []

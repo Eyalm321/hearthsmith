@@ -83,6 +83,41 @@ def collect_research(cfg: config.Config, store: Store, hp: Hyperpanes,
     return done
 
 
+def collect_suggestions(cfg: config.Config, store: Store, hp: Hyperpanes) -> list[dict]:
+    """Notice a Claude pane offering its own next prompt (ghost text after a turn) and, once it
+    has sat there unchanged long enough to not be you mid-sentence, say so — once per suggestion.
+    Observe-only: nothing is typed into any pane. Returns the ones newly worth reporting."""
+    snap = hp.snapshot(with_screens=False)
+    if not snap or cfg.hyperpanes.suggestions == "off":
+        return []
+    settle = cfg.hyperpanes.suggestion_settle_s
+    live = set()
+    fresh = []
+    for pane in snap.panes:
+        if pane.activity == "busy":
+            continue
+        text = hp.input_line(pane.id)
+        if not text:
+            continue
+        live.add(pane.id)
+        proj = (snap.project_for_cwd(pane.cwd) or {}).get("name", "")
+        # "same feature" today = same project; a pane still working there is a reason to wait
+        siblings_busy = sum(1 for q in snap.panes
+                            if q.id != pane.id and q.activity == "busy" and q.cwd == pane.cwd)
+        row = store.see_suggestion(pane.id, text, pane.label, proj, siblings_busy)
+        if row["state"] == "seen" and row["age"] >= settle:
+            store.set_suggestion_state(pane.id, "reported")
+            store.record_run(f"{pane.label} suggests: {text}", "suggestion", True,
+                             [f"sat {row['age']}s", f"{siblings_busy} sibling(s) busy in {proj or 'same dir'}"],
+                             target=pane.id)
+            fresh.append({**row, "siblings_busy": siblings_busy})
+    # a suggestion that vanished (accepted, dismissed, pane closed) is not ours to remember
+    for old in store.suggestions():
+        if old["pane_id"] not in live:
+            store.drop_suggestion(old["pane_id"])
+    return fresh
+
+
 def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = False,
               force: bool = False) -> dict:
     """force = the user asked ("Nag me now", `hearthsmith say "what should I do"`): skip the quiet-hours
@@ -98,6 +133,18 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
             voice.send(text, "soon", None)
             store.log_nag(found.get("task_id"), "research", "soon", text, "{}")
         return {"answered": found["question"], "answer": found["answer"][:400]}
+
+    # a pane waiting on a yes from you outranks a reminder, but not an answer you asked for
+    for sg in collect_suggestions(cfg, store, hp):
+        hold = f" ({sg['siblings_busy']} other pane{'s' if sg['siblings_busy'] > 1 else ''} still busy there)" \
+            if sg["siblings_busy"] else ""
+        text = f"'{sg['label']}' wants to: {sg['text'][:140]}{hold}. Yes or no?"
+        if not dry:
+            if not sprite.send(text, "soon", None):
+                NotifySink().send(text, "soon", None)
+            voice.send(text, "soon", None)
+            store.log_nag(None, "suggestion", "soon", text, "{}")
+        return {"suggestion": sg["text"], "pane": sg["pane_id"], "text": text}
 
     state, tasks = build_state(store, hp, cfg)
     last = store.last_nag_at()

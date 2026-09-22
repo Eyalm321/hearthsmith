@@ -62,6 +62,18 @@ CREATE TABLE IF NOT EXISTS watches (
   last_hash TEXT NOT NULL DEFAULT '',
   stable_since INTEGER
 );
+-- A Claude pane's own "next prompt" suggestion, sitting unaccepted in its input box. One row
+-- per pane: the text changes as the pane regenerates it, so it is keyed by pane, not text.
+CREATE TABLE IF NOT EXISTS suggestions (
+  pane_id    TEXT PRIMARY KEY,
+  label      TEXT NOT NULL DEFAULT '',
+  project    TEXT NOT NULL DEFAULT '',
+  text       TEXT NOT NULL,
+  first_seen INTEGER NOT NULL,
+  last_seen  INTEGER NOT NULL,
+  siblings_busy INTEGER NOT NULL DEFAULT 0,
+  state      TEXT NOT NULL DEFAULT 'seen'   -- seen | reported | accepted | dismissed
+);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 """
 
@@ -220,6 +232,37 @@ class Store:
 
     def unwatch(self, pane_id: str) -> None:
         self.db.execute("DELETE FROM watches WHERE pane_id=?", (pane_id,))
+
+    # -- suggestions -----------------------------------------------------------------------
+
+    def see_suggestion(self, pane_id: str, text: str, label: str, project: str,
+                       siblings_busy: int) -> dict:
+        """Upsert what the pane is offering; returns the row with `age` = seconds the same text
+        has been sitting there (0 when it just appeared or changed)."""
+        now = int(time.time())
+        row = self.db.execute("SELECT * FROM suggestions WHERE pane_id=?", (pane_id,)).fetchone()
+        if row is None or row["text"] != text:
+            self.db.execute("INSERT OR REPLACE INTO suggestions "
+                            "(pane_id,label,project,text,first_seen,last_seen,siblings_busy,state) "
+                            "VALUES (?,?,?,?,?,?,?,'seen')",
+                            (pane_id, label, project, text, now, now, siblings_busy))
+            first = now
+        else:
+            first = row["first_seen"]
+            self.db.execute("UPDATE suggestions SET last_seen=?, siblings_busy=?, label=?, project=? "
+                            "WHERE pane_id=?", (now, siblings_busy, label, project, pane_id))
+        out = dict(self.db.execute("SELECT * FROM suggestions WHERE pane_id=?", (pane_id,)).fetchone())
+        out["age"] = now - first
+        return out
+
+    def set_suggestion_state(self, pane_id: str, state: str) -> None:
+        self.db.execute("UPDATE suggestions SET state=? WHERE pane_id=?", (state, pane_id))
+
+    def drop_suggestion(self, pane_id: str) -> None:
+        self.db.execute("DELETE FROM suggestions WHERE pane_id=?", (pane_id,))
+
+    def suggestions(self) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT * FROM suggestions ORDER BY first_seen")]
 
     # -- nag log + kv ----------------------------------------------------------------------
 

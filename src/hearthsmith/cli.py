@@ -32,6 +32,7 @@ def main() -> None:
     sn = sub.add_parser("snooze"); sn.add_argument("task_id"); sn.add_argument("--minutes", type=int, default=120)
     sub.add_parser("state", help="print the T0 state paragraph the decider sees")
     sub.add_parser("nags")
+    sub.add_parser("suggestions", help="what the Claude panes are offering to do next")
     rr = sub.add_parser("runs", help="what he did, and the steps he took"); rr.add_argument("run_id", nargs="?"); rr.add_argument("-n", type=int, default=12); rr.add_argument("--task")
     mu = sub.add_parser("mute", help="stop all nagging for a while"); mu.add_argument("minutes", type=int, nargs="?", default=60)
     sub.add_parser("unmute")
@@ -99,6 +100,11 @@ def main() -> None:
         if not args.json:  # a human in a terminal hears him; the sprite speaks for itself
             from hearthsmith.voice import Voice
             Voice(cfg.voice).speak(r.text)
+    elif args.cmd == "suggestions":
+        for sg in store.suggestions():
+            age = int(time.time()) - sg["first_seen"]
+            print(f"{sg['state']:<9} {age:>4}s  {sg['label'][:24]:<24} {sg['text'][:90]}"
+                  + (f"  [{sg['siblings_busy']} busy]" if sg["siblings_busy"] else ""))
     elif args.cmd == "speak":
         from hearthsmith.voice import Voice
         v = Voice(cfg.voice)

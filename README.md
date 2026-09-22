@@ -121,6 +121,18 @@ pocket and qwen live in one warm server: `contrib/voice-server` (`hearthsmith-vo
 forge speak "Oi. That ledger's got rust on it."   # hear him; --no-play prints the wav paths
 ```
 
+## Suggestions
+
+After a turn, a Claude pane can offer its own next prompt as ghost text in its input box
+(Claude Code "prompt suggestions"; staged rollout, so it appears sometimes — force with
+`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true`; never on the first turn, in plan mode, or while a
+permission is pending). He watches idle panes for one, and once it has sat unchanged for
+`hyperpanes.suggestion_settle_s` (20s — the screen is plain text, so ghost text and a line you
+are typing look the same) he tells you once: *"'canora-sync' wants to: run the tests. Yes or
+no?"*, with how many sibling panes in that project are still busy. `hearthsmith suggestions`
+lists them. Observe-only for now (`hyperpanes.suggestions: observe | off`): accepting on your
+behalf, and holding off while a spec agent is still writing, is the next stage.
+
 ## Two bodies, one brain
 
 Jev decides; where the hands are depends on the job.
