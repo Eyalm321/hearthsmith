@@ -40,14 +40,17 @@ def _ollama(cfg: ComposeCfg, messages: list[dict]) -> str | None:
         return None
 
 
-def _openrouter(cfg: ComposeCfg, messages: list[dict]) -> str | None:
+def _openrouter(cfg: ComposeCfg, messages: list[dict], model: str | None = None,
+                max_tokens: int = 300, reasoning: bool = True) -> str | None:
     key = os.environ.get(cfg.fallback_key_env)
     if not key:
         return None
+    body: dict = {"model": model or cfg.fallback_model, "messages": messages, "max_tokens": max_tokens}
+    if not reasoning:
+        body["reasoning"] = {"enabled": False}  # thinking models: 4x slower for a summary
     try:
-        r = httpx.post(f"{cfg.fallback_base_url}/chat/completions", timeout=30.0,
-                       headers={"Authorization": f"Bearer {key}"},
-                       json={"model": cfg.fallback_model, "messages": messages, "max_tokens": 300})
+        r = httpx.post(f"{cfg.fallback_base_url}/chat/completions", timeout=45.0,
+                       headers={"Authorization": f"Bearer {key}"}, json=body)
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"].strip() or None
     except (httpx.HTTPError, KeyError, ValueError, IndexError):

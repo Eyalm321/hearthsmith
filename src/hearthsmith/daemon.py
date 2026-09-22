@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 from hearthsmith import config
 from hearthsmith.adapters import markdown
@@ -94,10 +95,68 @@ SUGGEST = {
 }
 
 
+def gather_org(hp: Hyperpanes, pane, siblings: list) -> dict:
+    """Everything the org already emits about goal `pane.meta.goal`, read, not asked for: the
+    spec agent's text, each sibling's role/state/last words, reports on the bus, subtask states
+    in the goal's work queue. Pure data; the models see only this."""
+    goal = pane.meta.get("goal", "")
+    project = pane.meta.get("project", "") or (pane.cwd or "")
+    spec = next((q for q in siblings if q.meta.get("role") == "spec"), None)
+    parent = pane.meta.get("parent")
+    reports = []
+    for pid in {pane.id, parent, spec.id if spec else None} - {None}:
+        for m in hp.messages(pid):
+            reports.append({"to": pid[:8], "from": str(m.get("from", ""))[:12],
+                            "body": str(m.get("body", ""))[:300]})
+    # queue name convention from the goal-orchestrator skill: <project name>-<goal id>
+    qname = f"{Path(project).name}-{goal}" if project else goal
+    tasks = hp.queue_tasks(qname) or hp.queue_tasks(goal)
+    return {
+        "goal": goal, "project": Path(project).name if project else "",
+        "pane": {"label": pane.label, "role": pane.meta.get("role")},
+        "spec_text": hp.last_answer(spec.id, 1200) if spec else "",
+        "siblings": [{"label": q.label, "role": q.meta.get("role"), "activity": q.activity,
+                      "last": hp.last_answer(q.id, 400)} for q in siblings],
+        "reports": reports[-12:],
+        "queue": {"name": qname, "tasks": tasks,
+                  "counts": {st: sum(1 for t in tasks if t["state"] == st)
+                             for st in ("queued", "claimed", "done", "failed", "dead")}},
+    }
+
+
+CONDENSE = (
+    "You summarise the state of a software goal being worked by several AI agent panes so a "
+    "separate decider can judge one pane's proposed next step. Write ONE paragraph, at most 120 "
+    "words, plain prose, in this order: what the goal is; what is finished; what is in flight or "
+    "blocked (name the subtask and who holds it); whether the PROPOSED STEP depends on anything "
+    "not yet finished, and on what; whether it is irreversible (push, deploy, delete, spend, "
+    "mark complete). State facts from the data only. Do not recommend."
+)
+
+
+def condense(cfg: config.Config, org: dict, proposed: str) -> str:
+    """One chat call turns the gathered org into the paragraph Jev reads. Any failure → a
+    mechanical summary from the queue counts, so the decision still happens on something."""
+    from hearthsmith.compose import _openrouter
+    body = json.dumps(org, ensure_ascii=False)[:24000]
+    out = _openrouter(cfg.compose, [{"role": "system", "content": CONDENSE},
+                                    {"role": "user", "content": f"PROPOSED STEP: {proposed}\n\nDATA:\n{body}"}],
+                      model=cfg.compose.judge_model, max_tokens=220, reasoning=False)
+    if out:
+        return out[:900]
+    k = org["queue"]["counts"]
+    inflight = [t["title"] for t in org["queue"]["tasks"] if t["state"] in ("queued", "claimed")]
+    busy = [q["label"] for q in org["siblings"] if q["activity"] == "busy"]
+    return (f"Goal {org['goal']} in {org['project']}: {k['done']} subtask(s) done, "
+            f"{k['claimed']} claimed, {k['queued']} queued, {k['failed'] + k['dead']} failed. "
+            f"In flight: {'; '.join(inflight[:4]) or 'nothing'}. Busy panes: {', '.join(busy) or 'none'}. "
+            f"(Condenser unavailable; this is a count-only summary.)")
+
+
 def _judge(cfg: config.Config, sg: dict, siblings: list) -> tuple[str, float]:
     """Jev's call on one settled suggestion. Falls back to `ask` on any backend trouble — the
     conservative answer is the one that only costs the user a sentence."""
-    from typesafe_sdk import Choice
+    from typesafe_sdk import Choice, Score
 
     from hearthsmith.route import _jev
     sib = "; ".join(f"{q.label}: {'busy' if q.activity == 'busy' else 'idle'}"
@@ -109,11 +168,26 @@ def _judge(cfg: config.Config, sg: dict, siblings: list) -> tuple[str, float]:
              f"It has been sitting unaccepted for {sg['age']}s.\n"
              f"Sibling panes on the same goal: {sib}.\n"
              f"Last thing the pane said: {sg.get('last_answer', '')[:600]}")
+    if sg.get("org_summary"):
+        state += f"\nState of the whole goal, condensed: {sg['org_summary']}"
+    qs = {"verdict": Choice(instructions="What should happen to this suggested next prompt?",
+                            criteria=SUGGEST)}
+    if sg.get("org_summary"):
+        qs["depends"] = Score(
+            instructions="Does the proposed step depend on work that is not yet finished?",
+            criteria=["nothing it needs is outstanding; everything it builds on is done",
+                      "unclear, or it touches something a sibling is still changing",
+                      "it clearly needs a subtask still in the queue, a sibling still working, or a report not yet in"])
     try:
-        a = _jev(cfg.decide, state, {"verdict": Choice(
-            instructions="What should happen to this suggested next prompt?", criteria=SUGGEST)})
+        a = _jev(cfg.decide, state, qs)
         v = a["verdict"]["choice"]
-        return v, float(a["verdict"].get("probabilities", {}).get(v, 0.0))
+        p = float(a["verdict"].get("probabilities", {}).get(v, 0.0))
+        # Score comes back as a criterion index (0..len-1); 0..1 is what the rule reads
+        dep = float(a.get("depends", {}).get("score", 0.0)) / 2.0 if "depends" in qs else 0.0
+        sg["depends"] = dep
+        if dep >= 0.5 and v == "accept":
+            return "wait", dep  # hard rule: never run ahead of the org
+        return v, p
     except Exception as e:  # noqa: BLE001 — decider down: ask, don't guess
         log.warning("suggestion judge failed: %s", e)
         return "ask", 0.0
@@ -151,7 +225,9 @@ def collect_suggestions(cfg: config.Config, store: Store, hp: Hyperpanes) -> lis
         if row["state"] != "seen" or row["age"] < settle:
             continue
         row.update(siblings_busy=siblings_busy, role=pane.meta.get("role"), goal=goal)
-        if mode != "accept" or not pane.mine():
+        pressable = pane.pressable(cfg.hyperpanes.suggestion_accept_roles) \
+            and pane.meta.get("role") != "goals-orch"
+        if mode != "accept" or not pressable:
             store.set_suggestion_state(pane.id, "reported")
             store.record_run(f"{pane.label} suggests: {text}", "suggestion", True,
                              [f"sat {row['age']}s", f"{siblings_busy} sibling(s) busy", "reported"],
@@ -161,8 +237,13 @@ def collect_suggestions(cfg: config.Config, store: Store, hp: Hyperpanes) -> lis
         if siblings_busy:
             continue  # wait, silently; re-judged next heartbeat once they settle
         row["last_answer"] = hp.last_answer(pane.id)
+        if goal and cfg.hyperpanes.suggestion_org_aware:
+            org = gather_org(hp, pane, siblings)
+            row["org_summary"] = condense(cfg, org, text)
         verdict, p = _judge(cfg, row, siblings)
         steps = [f"sat {row['age']}s", f"jev: {verdict} p={p:.2f}"]
+        if "org_summary" in row:
+            steps.append(f"depends={row.get('depends', 0):.2f}: {row['org_summary'][:300]}")
         if verdict == "accept" and p >= cfg.hyperpanes.suggestion_accept_min_p:
             # the pane may have regenerated it since we read; press only what we judged
             if hp.input_line(pane.id) != text:

@@ -31,6 +31,9 @@ class ComposeCfg:
     fallback_model: str = "deepseek/deepseek-v4.1-flash"
     fallback_base_url: str = "https://openrouter.ai/api/v1"
     fallback_key_env: str = "OPENROUTER_API_KEY"
+    # condenses a goal org's state (spec, siblings, bus reports, queue) into one paragraph
+    # before Jev judges a pane's suggested next step. Flash is plenty; -pro is a swap here.
+    judge_model: str = "xiaomi/mimo-v2.6-flash"
     persona: str = (
         "You are a gruff but warm-hearted dwarven blacksmith who keeps the user's task forge. "
         "One or two short sentences. Smithing metaphors welcome, never cheesy. "
@@ -59,6 +62,13 @@ class HyperpanesCfg:
     # you are typing in, and never while a sibling of the same goal is still working.
     # Requires suggestions: accept. Each press is a recorded run.
     suggestion_accept_min_p: float = 0.7
+    # Panes an agent org spawned for itself (goal-orchestrator skill stamps role=spec|impl) may
+    # be pressed too; goals-orch stays report-only — its suggestions are goal-level, your call.
+    suggestion_accept_roles: list[str] = field(default_factory=lambda: ["impl", "spec"])
+    # Stage 3: when the pane carries meta.goal, gather the org (spec text, siblings' last
+    # answers, bus reports, work queue) and have `compose.judge_model` condense it for Jev;
+    # a suggestion that depends on unfinished work waits regardless of the verdict.
+    suggestion_org_aware: bool = True
     # `hearthsmith say` routed to a pane: type into the agent's prompt when it is idle (it acts now);
     # a busy pane gets an inbox message instead (it sees it on its next read_messages)
     say_types_into_idle_pane: bool = True

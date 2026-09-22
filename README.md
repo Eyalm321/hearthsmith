@@ -140,6 +140,16 @@ the input line still reads what was judged (the pane regenerates suggestions whi
 Busy siblings mean wait, no call made. Anything irreversible comes back as dismiss or ask; ask
 is the fallback when the decider is down. Every verdict is a run (`hearthsmith runs`).
 
+Panes an agent org spawned for itself (`goal-orchestrator` skill: `meta.role=spec|impl`,
+`meta.goal`) count as his too (`suggestion_accept_roles`); the goals orchestrator itself is
+report-only, its suggestions are goal-level. For those, one more step before Jev: he gathers
+what the org already emits — the spec agent's text, siblings' last words, reports on the pane
+message bus, subtask states in the goal's work queue — and `compose.judge_model` (MiMo v2.6
+flash on OpenRouter, ~$0.001, ~3s) condenses it into one paragraph Jev reads, plus a *depends on
+unfinished work* score that forces wait over accept. Observed on a real queue: "run the tests"
+waits at 0.90 while the sibling's subtask is claimed, accepts at 0.92 once it is done; "git push"
+dismissed at 0.85. Design: `docs/suggestions-stage3-scope.md`.
+
 ## Two bodies, one brain
 
 Jev decides; where the hands are depends on the job.

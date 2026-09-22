@@ -37,6 +37,11 @@ class Pane:
         """Spawned by the smith (route "spawn", research). Never the user's own interactive panes."""
         return self.meta.get("owner") == "hearthsmith"
 
+    def pressable(self, roles: list[str]) -> bool:
+        """His own, or an agent org's worker (role stamped by the orchestrator that spawned it).
+        A pane with no meta at all is one you opened — never."""
+        return self.mine() or (self.meta.get("role") in roles and bool(self.meta.get("goal")))
+
 
 @dataclass
 class Snapshot:
@@ -229,6 +234,23 @@ class Hyperpanes:
             if isinstance(res, dict):
                 res = res.get("paneId") or res.get("id")
             return res if isinstance(res, str) else None
+
+    def messages(self, pane_id: str, limit: int = 20) -> list[dict]:
+        """The pane's durable inbox (agents report up with send_to_parent). Newest last."""
+        with self._client() as c:
+            r = c.get(f"/panes/{pane_id}/messages")
+            if r.status_code != 200:
+                return []
+            return (r.json().get("messages") or [])[-limit:]
+
+    def queue_tasks(self, queue: str) -> list[dict]:
+        """Subtasks of one work queue with their state (queued|claimed|done|failed|dead)."""
+        with self._client() as c:
+            r = c.get(f"/queues/{queue}/tasks")
+            if r.status_code != 200:
+                return []
+            return [{k: t.get(k) for k in ("title", "state", "claimedBy", "error", "updatedAt")}
+                    for t in r.json().get("tasks") or []]
 
     def press(self, pane_id: str, *keys: str) -> bool:
         """Named keys only (tab, enter, escape…): no text can be typed this way, which is why

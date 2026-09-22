@@ -8,12 +8,15 @@ compose:
   ollama_url: http://admins-mac-mini.local:11434
   ollama_model: hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q5_K_M
   fallback_model: deepseek/deepseek-v4.1-flash
+  judge_model: xiaomi/mimo-v2.6-flash     # condenses a goal org's state for the suggestion judge
 hyperpanes:
   allow_pane_input: false          # /input is arbitrary command exec; keep off
   delegate_queue: hearthsmith
   delegate_enabled: false
   suggestions: observe             # a pane's ghost-text next prompt: observe (tell you) | accept (his own panes, Jev judges) | off
   suggestion_accept_min_p: 0.7     # accept below this confidence becomes ask
+  suggestion_accept_roles: [impl, spec]   # agent-org panes he may press; goals-orch never
+  suggestion_org_aware: true       # gather spec/siblings/bus/queue and condense before Jev
   suggestion_settle_s: 20          # unchanged this long before he mentions it      # turn on once a worker drains the queue
 desktop:
   hands: false                 # true = he may use the real mouse/keyboard (exclusive)
