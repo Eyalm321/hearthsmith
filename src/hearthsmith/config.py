@@ -133,6 +133,25 @@ class CalendarCfg:
 
 
 @dataclass
+class EarCfg:
+    """Talking to him (ear.py). The mic opens only for a turn or a conversation."""
+    source: str = ""                  # PipeWire source (`pactl list sources short`); "" = default
+    model: str = "large-v3-turbo"     # faster-whisper model, run locally
+    device: str = "cuda"
+    compute_type: str = "float16"
+    language: str = "en"              # "" = detect
+    preload: bool = True              # load at service start, so the first turn isn't 4s slower
+    idle_unload_min: int = 30         # free the GPU after this long unused (0 = never)
+    end_silence_s: float = 0.8        # a pause this long ends what you said
+    wait_s: float = 8.0               # a single turn gives up if you say nothing for this long
+    conversation_idle_s: float = 45.0  # conversation mode ends after this much silence
+    barge_in: bool = True             # talk over him and he stops
+    barge_in_ms: int = 300            # sustained speech needed to cut him off
+    barge_in_strict: float = 1.8      # × the normal speech threshold while he's talking
+    hotkey: str = "<Super>j"          # install.sh binds `hearthsmith-ear listen` to it
+
+
+@dataclass
 class VoiceCfg:
     """How he sounds. Zero-shot clone from one reference clip, so the voice IS the clip: swap
     `ref` (and its transcript `ref_text`) and he speaks like someone else.
@@ -179,6 +198,7 @@ class Config:
     nag: NagCfg = field(default_factory=NagCfg)
     brief: BriefCfg = field(default_factory=BriefCfg)
     calendar: CalendarCfg = field(default_factory=CalendarCfg)
+    ear: EarCfg = field(default_factory=EarCfg)
     voice: VoiceCfg = field(default_factory=VoiceCfg)
     db_path: Path = STATE_DIR / "hearthsmith.db"
     sprite_path: Path = STATE_DIR / "sprite.json"

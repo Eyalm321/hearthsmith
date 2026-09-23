@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -57,7 +58,10 @@ class Voice:
     def __init__(self, cfg: VoiceCfg):
         self.cfg = cfg
         self._auk_client = None
-        self.engines = list(cfg.engines)  # shrinks as engines refuse; empty = he's mute this run
+        self.engines = list(cfg.engines)
+        # interrupt(): the listener cuts him off when you start talking over him
+        self._cut = threading.Event()
+        self._live: subprocess.Popen | None = None  # shrinks as engines refuse; empty = he's mute this run
 
     def available(self) -> bool:
         return self.cfg.enabled and self.cfg.ref.exists() and bool(self.engines)
@@ -98,7 +102,7 @@ class Voice:
         are made (first sound ~0.2s), and are tee'd into the cache so a repeat is instant."""
         out = self.cfg.cache_dir / f"{self._key(text, 'pocket')}.wav"
         if out.exists():
-            return play(out, self.cfg.timeout_seconds, self.cfg.sink)
+            return self._play(out)
         player = raw_player(self.cfg.sink)
         if player is None:
             return False
@@ -108,13 +112,24 @@ class Voice:
             r.raise_for_status()
             with subprocess.Popen(player, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL) as proc:
+                self._live = proc
                 try:
                     for b in r.iter_bytes():
+                        if self._cut.is_set():
+                            break
                         proc.stdin.write(b)
                         pcm += b
+                except BrokenPipeError:
+                    pass                         # the player was killed under us: interrupted
                 finally:
-                    proc.stdin.close()
+                    self._live = None
+                    try:
+                        proc.stdin.close()
+                    except BrokenPipeError:
+                        pass
                     proc.wait(timeout=self.cfg.timeout_seconds)
+        if self._cut.is_set():
+            return False                         # half a line isn't worth caching
         write_wav(out, bytes(pcm), 24000)
         return proc.returncode == 0
 
@@ -160,7 +175,38 @@ class Voice:
                 self.engines.pop(0)
         raise RuntimeError(f"no engine could speak: {last}")
 
+    def interrupt(self) -> None:
+        """Stop talking now: kill the player and skip whatever was still to come."""
+        self._cut.set()
+        if (p := self._live) is not None:
+            try:
+                p.kill()
+            except OSError:
+                pass
+
+    def _play(self, wav: Path) -> bool:
+        if self._cut.is_set():
+            return False
+        player = [c for c in (["pw-play", *(["--target", self.cfg.sink] if self.cfg.sink else [])],
+                              ["paplay", *(["--device", self.cfg.sink] if self.cfg.sink else [])])
+                  if shutil.which(c[0])]
+        if not player:
+            return play(wav, self.cfg.timeout_seconds, self.cfg.sink)
+        try:
+            with subprocess.Popen([*player[0], str(wav)], stdout=subprocess.DEVNULL,
+                                  stderr=subprocess.DEVNULL) as proc:
+                self._live = proc
+                try:
+                    proc.wait(timeout=self.cfg.timeout_seconds)
+                finally:
+                    self._live = None
+            return proc.returncode == 0 and not self._cut.is_set()
+        except (OSError, subprocess.SubprocessError) as e:
+            log.warning("voice: %s failed: %s", player[0][0], e)
+            return False
+
     def speak(self, text: str) -> bool:
+        self._cut.clear()
         if not self.available():
             return False
         # pocket streams the whole line itself; no chunking, no pipeline needed
@@ -197,7 +243,9 @@ class Voice:
                     return False
                 if nxt is not None:
                     pending = pool.submit(self._one, nxt)
-                ok = play(wav, self.cfg.timeout_seconds, self.cfg.sink) and ok
+                if self._cut.is_set():
+                    return False
+                ok = self._play(wav) and ok
         return ok
 
 

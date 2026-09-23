@@ -14,6 +14,7 @@ One Jev call for intent + target + due; one optional compose call for the reply 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -257,8 +258,47 @@ def _label(brief: str) -> str:
 
 
 def route(text: str, cfg: config.Config | None = None) -> Reply:
+    """Act on what was said, and log the exchange so the next thing said can follow on."""
+    from hearthsmith import convo
     cfg = cfg or config.load()
     store = Store(cfg.db_path)
+    r = _route(text, cfg, store)
+    try:
+        convo.log(store, text, r.text, r.intent, r.task_id)
+    except Exception:  # a lost log line must not lose the reply
+        logging.getLogger("hearthsmith.route").exception("conversation log failed")
+    return r
+
+
+# "move it to friday", "push the vet to next week", "make that due tomorrow at 9"
+RESCHEDULE = re.compile(r"^\s*(?:(?:can|could)\s+you\s+)?(?:please\s+)?(?:actually[,\s]+)?"
+                        r"(?:move|push|reschedule|shift|bump|postpone|change|set|make)\s+(?P<what>.+?)\s+"
+                        r"(?:to|till|until|for|due|back\s+to|out\s+to)\s+(?P<when>.+?)[.!?]*$",
+                        re.IGNORECASE)
+
+
+def _reschedule(text: str, store: Store, tasks: list, last: str | None) -> Reply | None:
+    """A new date for a task already on the ledger — "it" being the one just talked about."""
+    from hearthsmith import convo
+    m = RESCHEDULE.match(text)
+    if not m:
+        return None
+    _, due = when.parse(m["when"])
+    if due is None:
+        return None
+    what = m["what"]
+    t = (store.get(last) if last and convo.refers_back(what) else None) \
+        or next((x for x in tasks if _same_thing(what, x.title)), None)
+    if t is None:
+        return None
+    store.edit(t.id, due=due)
+    return Reply("snooze", f"'{t.title}' — now due {when.describe(due)}.", t.id)
+
+
+def _route(text: str, cfg: config.Config, store: Store) -> Reply:
+    from hearthsmith import convo
+    history = convo.recent(store)
+    last = convo.last_task(store)
     hp = Hyperpanes(cfg.hyperpanes.control_file, cfg.hyperpanes.tail_lines,
                     cfg.hyperpanes.allow_pane_input)
     markdown.sync(cfg.nag.markdown_file, store)
@@ -281,12 +321,18 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
     if calendar.wants(text) and not when.REMINDER.match(text):
         return Reply("calendar", calendar.answer(cfg.calendar, text))
 
+    if r := _reschedule(text, store, tasks, last):
+        return r
+
     # an answer to his "want me to split it or hand it off?" — no decider needed
     from hearthsmith import offer
     if said := offer.answer(cfg, store, text):
         return Reply("offer", said)
 
     state = {"user_said": text,
+             **({"conversation_so_far": convo.transcript(history)} if history else {}),
+             **({"task_just_discussed": (store.get(last).title if store.get(last) else None)}
+                if last and convo.refers_back(text) else {}),
              "open_tasks": {t.id: t.title for t in tasks[:40]},
              "panes": {p.id: f"{p.label} (cwd {p.cwd}, {p.activity})" for p in (snap.panes if snap else [])},
              "projects": [p["name"] for p in (snap.projects if snap else [])]}
@@ -517,8 +563,9 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
             return Reply(intent, f"Queued for a worker ({cfg.hyperpanes.delegate_queue}).", t.id, raw=raw)
         return Reply("add", "No worker available; kept it on the ledger.", t.id, raw=raw)
 
-    if intent in ("done", "snooze") and "task" in a:
-        tid = a["task"]["choice"]
+    if intent in ("done", "snooze") and ("task" in a or last):
+        # "that's done" right after talking about a task means that task
+        tid = last if (last and convo.refers_back(text) and store.get(last)) else a.get("task", {}).get("choice")
         t = store.get(tid)
         if t:
             if intent == "done":
@@ -536,7 +583,8 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
 
     # ask / fallthrough
     from hearthsmith.memory import Memory
-    situation = (f"The user said: '{text}'.\n{Memory(store).paragraph()}\nOpen tasks: " +
+    situation = ((f"Conversation so far:\n{convo.transcript(history)}\n\n" if history else "")
+                 + f"The user said: '{text}'.\n{Memory(store).paragraph()}\nOpen tasks: " +
                  ("; ".join(t.title for t in tasks[:10]) or "none") +
                  (f"\nPanes: {', '.join(p.label for p in snap.panes)}" if snap else ""))
     line = _say(cfg.compose, situation, "Answer briefly, in character.") or "Aye."

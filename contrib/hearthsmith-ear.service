@@ -1,0 +1,16 @@
+[Unit]
+Description=hearthsmith ear (local Whisper; the mic opens only when you talk to him)
+PartOf=graphical-session.target
+After=graphical-session.target pipewire.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hearthsmith-ear serve
+EnvironmentFile=-%h/.config/hearthsmith/env
+Environment=PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

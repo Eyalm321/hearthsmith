@@ -17,6 +17,10 @@ dependencies = [
     "gradio_client>=1.0",
     "icalendar>=7.3.0",
     "recurring-ical-events>=3.8.2",
+    "faster-whisper>=1.2.1",
+    "nvidia-cublas-cu12==12.9.2.10",
+    "nvidia-cudnn-cu12==9.24.0.43",
+    "numpy>=2.5.3",
 ]
 
 [project.scripts]
@@ -27,6 +31,7 @@ hearthsmith-sprite-preview = "hearthsmith.sprite.preview:main"
 hearthsmith-sprite-icon = "hearthsmith.sprite.preview:icon_main"
 hearthsmith-sprite-slice = "hearthsmith.sprite.slice:main"
 hearthsmith-look = "hearthsmith.desktop.vision:_cli"
+hearthsmith-ear = "hearthsmith.ear:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]

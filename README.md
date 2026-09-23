@@ -108,6 +108,16 @@ and it's set through next Sunday. Same delivery as the daily brief; on demand wi
 week go", **Weekly review** in his menu, `hearthsmith brief weekly`, or `hearthsmith_brief` with
 kind `weekly`.
 
+**Talk to him out loud.** Press **Super+J**, say it, stop talking: he hears it, does it, and
+answers aloud. Press it while he's talking and he stops to listen; talk over him and he stops too.
+**Conversation mode** (his right-click menu, or `hearthsmith-ear talk`) keeps him listening
+after each answer until you say "that's all" or go quiet for 45 seconds. He remembers the last
+ten minutes of what you said to each other, typed or spoken, so "remind me to order filament
+Friday" then "actually, move it to Monday at ten" moves that task. Speech is transcribed on your
+GPU by faster-whisper (large-v3-turbo, ~0.3s for a sentence); audio never leaves the machine, and
+the mic (`ear.source`) is open only during a turn or a conversation. The listener is
+`hearthsmith-ear.service`; settings under `ear:`.
+
 Ask him a question and he answers it rather than reporting that a page was opened. One page
 holds it ("what does the P2S cost") → he opens the page and reads it, a couple of seconds, and
 says so plainly when the page doesn't actually contain it. It needs comparing sources ("what do

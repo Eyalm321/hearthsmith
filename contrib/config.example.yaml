@@ -44,3 +44,11 @@ calendar:
   refresh_min: 15
   heads_up_min: 10                 # 0 = no heads-up before meetings
   hold_nags_in_meetings: true
+ear:
+  source: ""                       # PipeWire source for the mic (pactl list sources short); "" = default
+  model: large-v3-turbo            # faster-whisper, local GPU
+  language: en
+  end_silence_s: 0.8               # pause that ends what you said
+  conversation_idle_s: 45
+  barge_in: true                   # talk over him and he stops
+  hotkey: "<Super>j"

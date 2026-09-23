@@ -474,6 +474,14 @@ class Sprite(Gtk.Window):
         m.append(Gtk.SeparatorMenuItem())
         item("Ledger…", self.open_ledger)
         item("Talk to him…", self.open_prompt)
+        from hearthsmith import ear
+        st = ear.send("status", timeout=0.5)
+        if "error" not in st:
+            item("Listen (Super+J)", lambda: ear.send("listen"))
+            conv = Gtk.CheckMenuItem(label="Conversation mode")
+            conv.set_active(bool(st.get("conversation")))
+            conv.connect("activate", lambda *_: ear.send("talk"))
+            m.append(conv)
         item("Brief me", lambda: self._forge("brief", "--deliver"))
         item("Weekly review", lambda: self._forge("brief", "weekly", "--deliver"))
         item("Nag me now", lambda: self._systemctl("start", "hearthsmithd-now.service"))
