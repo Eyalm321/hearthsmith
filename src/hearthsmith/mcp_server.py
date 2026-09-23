@@ -51,6 +51,75 @@ def hearthsmith_tasks_add(title: str, due: str | None = None, project: str | Non
                                   repeat=rule, parent_id=parent_id).as_dict())
 
 
+def _missing(task_id: str) -> str:
+    return json.dumps({"error": "no such task", "task_id": task_id})
+
+
+@mcp.tool()
+def hearthsmith_tasks_get(task_id: str) -> str:
+    """One task in full: its fields, its steps, and the last few things done about it (agent
+    hand-offs and reports, research, nags). Accepts an id prefix."""
+    t = store().get(task_id)
+    if not t:
+        return _missing(task_id)
+    runs = [{k: r[k] for k in ("at", "body", "ok", "goal", "note")} for r in store().runs(8, t.id)]
+    return json.dumps({**t.as_dict(), "steps": [c.as_dict() for c in store().children(t.id)],
+                       "runs": runs}, indent=1)
+
+
+@mcp.tool()
+def hearthsmith_tasks_edit(task_id: str, title: str | None = None, due: str | None = None,
+                     project: str | None = None, tags: str | None = None,
+                     notes: str | None = None, append_notes: str | None = None,
+                     repeat: str | None = None, parent_id: str | None = None) -> str:
+    """Change a task. Only the fields given change. due: ISO date/datetime, or "" to clear.
+    repeat: "day", "weekday", "mon,thu", "2 weeks"…, or "" to stop repeating. parent_id: make it
+    a step of that task, "" to make it top-level again. append_notes adds to the notes instead of
+    replacing them. Nag count and state are left alone (use _done / _block / _reopen)."""
+    from hearthsmith.when import rule_of
+    t = store().get(task_id)
+    if not t:
+        return _missing(task_id)
+    fields: dict = {k: v for k, v in (("title", title), ("project", project), ("tags", tags),
+                                      ("notes", notes)) if v is not None}
+    if due is not None:
+        fields["due"] = _due(due) if due else None
+    if repeat is not None:
+        rule = rule_of(repeat) if repeat else ""
+        if repeat and not rule:
+            return json.dumps({"error": f"can't read repeat {repeat!r}"})
+        fields["repeat"] = rule
+    if parent_id is not None:
+        parent = store().get(parent_id) if parent_id else None
+        if parent_id and (parent is None or parent.id == t.id):
+            return json.dumps({"error": "no such parent", "parent_id": parent_id})
+        fields["parent_id"] = parent.id if parent else None
+    if append_notes:
+        fields["notes"] = (fields.get("notes", t.notes).rstrip() + "\n" + append_notes).strip()
+    return json.dumps(store().edit(t.id, **fields).as_dict())
+
+
+@mcp.tool()
+def hearthsmith_tasks_reopen(task_id: str) -> str:
+    """Put a done, blocked or delegated task back to open."""
+    t = store().get(task_id)
+    if not t:
+        return _missing(task_id)
+    return json.dumps(store().set_state(t.id, "open").as_dict())
+
+
+@mcp.tool()
+def hearthsmith_tasks_delete(task_id: str) -> str:
+    """Delete a task and its steps for good (prefer _done for finished work — done tasks feed
+    the evening wrap). Returns what was deleted, so it can be re-added."""
+    t = store().get(task_id)
+    if not t:
+        return _missing(task_id)
+    gone = {**t.as_dict(), "steps": [c.as_dict() for c in store().children(t.id)]}
+    store().delete(t.id)
+    return json.dumps({"deleted": gone})
+
+
 @mcp.tool()
 def hearthsmith_tasks_hand(task_id: str) -> str:
     """Hand a task to a Claude agent in a hyperpanes pane (one already on that work in the

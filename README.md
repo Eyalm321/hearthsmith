@@ -99,7 +99,7 @@ Same `Noul` / `Score` / `Choice` questions in every backend — swapping is a co
 claude mcp add hearthsmith -- $(pwd)/.venv/bin/hearthsmith-mcp
 ```
 
-Tools: `hearthsmith_tasks_list / _add / _done / _block / _snooze / _split / _hand`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
+Tools: `hearthsmith_tasks_list / _get / _add / _edit / _done / _reopen / _block / _snooze / _delete / _split / _hand`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
 
 ## tasks.md
 
