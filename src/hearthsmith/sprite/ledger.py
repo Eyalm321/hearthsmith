@@ -4,7 +4,7 @@ straight from SQLite, so a task an agent adds over MCP shows up here within a co
 Add box takes the tasks.md syntax (`title @due(2026-09-25T18:00) +project #tag`) or plain
 words ("call the vet friday 5pm", see when.py). Tick = done,
 click a row = its notes and what he did about it, ⋯ = edit / add step / split into steps /
-snooze / block / delete. Steps sit under their task with a count; `@every(mon)` or "every monday"
+hand to agent / snooze / block / delete. Steps sit under their task with a count; `@every(mon)` or "every monday"
 makes a task repeat, and ticking it off puts the next one on the ledger.
 
 Lives in the sprite process (system python, GTK3): right click him → Ledger, or middle click.
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
@@ -62,7 +63,7 @@ CSS = b"""
 #ledger check:checked { background: #ff9a2e; border-color: #ff9a2e; }
 """
 
-TABS = (("open", "Open"), ("blocked", "Blocked"), ("done", "Done"))
+TABS = (("open", "Open"), ("delegated", "Agents"), ("blocked", "Blocked"), ("done", "Done"))
 
 
 def _when(ts: int) -> str:
@@ -200,7 +201,9 @@ class Ledger(Gtk.Window):
             self.list.remove(c)
         n_open = len(self.store.list("open"))
         n_over = sum(t.overdue for t in self.store.list("open"))
-        self.count.set_text(f"{n_open} open" + (f" · {n_over} overdue" if n_over else ""))
+        n_agents = len(self.store.list("delegated"))
+        self.count.set_text(f"{n_open} open" + (f" · {n_over} overdue" if n_over else "")
+                            + (f" · {n_agents} with agents" if n_agents else ""))
         tasks = self.store.list(self.tab)
         if self.tab == "open":
             ids = {t.id for t in tasks}
@@ -210,6 +213,7 @@ class Ledger(Gtk.Window):
             tasks = tasks[:50]
         if not tasks:
             lab = Gtk.Label(label={"open": "Anvil's clear. Nothing on the ledger.",
+                                   "delegated": "No agent is holding anything.",
                                    "blocked": "Nothing stuck.",
                                    "done": "Nothing finished yet."}[self.tab])
             lab.get_style_context().add_class("empty")
@@ -317,6 +321,13 @@ class Ledger(Gtk.Window):
             bits.append(f"↻ {esc(when.describe_rule(t.repeat))}")
         if kids := self.store.children(t.id):
             bits.append(f"{sum(k.state == 'done' for k in kids)}/{len(kids)} steps")
+        if t.state == "delegated":
+            w = self.store.db.execute("SELECT started_at FROM watches WHERE task_id=?",
+                                      (t.id,)).fetchone()
+            bits.append(f"with an agent · {max(1, (int(time.time()) - w[0]) // 60)} min"
+                        if w else "handed off")
+        elif t.state == "open" and (r := self.store.last_run(t.id)) and r["body"] == "agent":
+            bits.append("<span foreground='#ff9a2e'>agent reported — check it</span>")
         if t.nag_count:
             bits.append(f"nagged {t.nag_count}×")
         if t.source != "hearthsmith":
@@ -348,12 +359,15 @@ class Ledger(Gtk.Window):
         if t.state == "open" and not t.parent_id:
             item("Add step…", lambda: setattr(self, "adding_step", t.id))
             item("Split into steps", lambda: self._split(t))
+            item("Hand to agent", lambda: self._cli(t, "handing", "hand", t.id))
         if t.state == "open":
             item("Snooze 1 hour", lambda: self.store.snooze(t.id, 60))
             item("Snooze till tomorrow 9:00", lambda: self.store.snooze(t.id, _tomorrow_9()))
             if t.snoozed:
                 item("Wake", lambda: self.store.snooze(t.id, 0))
             item("Block", lambda: self.store.set_state(t.id, "blocked"))
+        elif t.state == "delegated":
+            item("Take back", lambda: self._cli(t, None, "hand", "--back", t.id))
         else:
             item("Reopen", lambda: self.store.set_state(t.id, "open"))
         m.append(Gtk.SeparatorMenuItem())
@@ -408,17 +422,25 @@ class Ledger(Gtk.Window):
         return False
 
     def _split(self, t: Task) -> None:
-        """The compose model lives in the venv, not this GTK python: ask the CLI. The poll picks
-        the steps up when they land."""
+        self.expanded.discard(t.id)
+        self._cli(t, "splitting", "split", t.id)
+
+    def _cli(self, t: Task, event: str | None, *args: str) -> None:
+        """Models and hyperpanes live in the venv, not this GTK python: ask the CLI, in the
+        background. The poll picks up whatever it changes; its last line is his to say."""
         import subprocess
         import threading
 
         from hearthsmith.sprite.renderer import _bin
-        self.expanded.discard(t.id)
-        self.on_event("splitting", t)
-        threading.Thread(target=lambda: subprocess.run([_bin("hearthsmith"), "split", t.id],
-                                                       capture_output=True, timeout=120, check=False),
-                         daemon=True).start()
+        if event:
+            self.on_event(event, t)
+
+        def run():
+            out = subprocess.run([_bin("hearthsmith"), *args], capture_output=True, text=True,
+                                 timeout=180, check=False)
+            if said := (out.stdout.strip().splitlines() or [""])[0]:
+                GLib.idle_add(self.on_event, "said", Task(id=t.id, title=said))
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_row(self, _l, row) -> None:
         if tid := getattr(row, "task_id", None):

@@ -48,6 +48,16 @@ than a backlog of three. And tasks can have **steps**: ledger → *Add step…*,
 step ("write the copy (step of 'the site launch')"), carrying the task's due date; finishing the
 task finishes its steps.
 
+Any task can be **handed to an agent**: ledger → *Hand to agent*, "give the changelog to an
+agent", `hearthsmith hand <id>`, or `hearthsmith_tasks_hand` over MCP. It goes to a Claude pane
+already on that work in the task's project if there is one, else a new pane in the project's
+folder, briefed with the title, notes, open steps and an ask to finish with a short report. The
+task moves to the ledger's **Agents** tab. When the agent goes quiet, the heartbeat reads its
+last reply from Claude Code's session transcript (the screen scrape is the fallback), appends it
+to the task's notes, puts the task back in Open marked *agent reported — check it*, and tells
+you. He doesn't tick it off for you. *Take back* (or `hearthsmith hand --back <id>`) stops
+waiting on the agent.
+
 Twice a day he tells you where things stand. The **morning brief** (from 08:30): what landed
 overnight — answers, agents that finished or didn't — what's overdue, what's due today, what's
 stuck, which panes are waiting on a yes. The **evening wrap** (from 18:30): what you struck off,
@@ -89,7 +99,7 @@ Same `Noul` / `Score` / `Choice` questions in every backend — swapping is a co
 claude mcp add hearthsmith -- $(pwd)/.venv/bin/hearthsmith-mcp
 ```
 
-Tools: `hearthsmith_tasks_list / _add / _done / _block / _snooze / _split`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
+Tools: `hearthsmith_tasks_list / _add / _done / _block / _snooze / _split / _hand`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
 
 ## tasks.md
 

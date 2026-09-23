@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS watches (
   question  TEXT NOT NULL,
   started_at INTEGER NOT NULL,
   last_hash TEXT NOT NULL DEFAULT '',
-  stable_since INTEGER
+  stable_since INTEGER,
+  kind      TEXT NOT NULL DEFAULT 'research'   -- research: answer closes it | task: report reopens it
 );
 -- A Claude pane's own "next prompt" suggestion, sitting unaccepted in its input box. One row
 -- per pane: the text changes as the pane regenerates it, so it is keyed by pane, not text.
@@ -127,6 +128,9 @@ class Store:
                              ("next_id", "TEXT")):
                 if col not in have:
                     self.db.execute(f"ALTER TABLE tasks ADD COLUMN {col} {ddl}")
+        have = {r["name"] for r in self.db.execute("PRAGMA table_info(watches)")}
+        if have and "kind" not in have:
+            self.db.execute("ALTER TABLE watches ADD COLUMN kind TEXT NOT NULL DEFAULT 'research'")
         self.db.executescript(SCHEMA)
 
     # -- tasks -----------------------------------------------------------------------------
@@ -253,6 +257,13 @@ class Store:
              _json.dumps(steps), _json.dumps(decide_ms or []), seen))
         return rid
 
+    def last_run(self, task_id: str) -> dict | None:
+        """The run that most recently *finished* for a task — a watched agent's run starts when
+        it was handed the work, so start time would put the hand-off after its own report."""
+        r = self.db.execute("SELECT * FROM runs WHERE task_id=? ORDER BY COALESCE(ended_at, at) DESC, "
+                            "rowid DESC LIMIT 1", (task_id,)).fetchone()
+        return dict(r) if r else None
+
     def runs(self, n: int = 20, task_id: str | None = None) -> list[dict]:
         q = "SELECT * FROM runs"
         args: list = []
@@ -270,9 +281,10 @@ class Store:
 
     # -- watches ---------------------------------------------------------------------------
 
-    def watch(self, pane_id: str, question: str, task_id: str | None = None) -> None:
-        self.db.execute("INSERT OR REPLACE INTO watches (pane_id,task_id,question,started_at) "
-                        "VALUES (?,?,?,?)", (pane_id, task_id, question, int(time.time())))
+    def watch(self, pane_id: str, question: str, task_id: str | None = None,
+              kind: str = "research") -> None:
+        self.db.execute("INSERT OR REPLACE INTO watches (pane_id,task_id,question,started_at,kind) "
+                        "VALUES (?,?,?,?,?)", (pane_id, task_id, question, int(time.time()), kind))
 
     def watches(self) -> list[dict]:
         return [dict(r) for r in self.db.execute("SELECT * FROM watches ORDER BY started_at")]

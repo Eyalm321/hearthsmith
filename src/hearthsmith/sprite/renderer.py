@@ -529,11 +529,15 @@ class Sprite(Gtk.Window):
         elif kind == "again":
             from hearthsmith.when import describe
             self.text, self.instant = f"Back on the anvil {describe(task.due)}.", True
+        elif kind == "handing":
+            self.text, self.instant = f"Finding an agent for '{task.title[:40]}'…", True
+        elif kind == "said":
+            self.text, self.instant = task.title[:200], True
         elif kind == "splitting":
             self.text, self.instant = f"Cutting '{task.title[:40]}' into pieces…", True
         else:
             return
-        self.text_until = time.time() + 5
+        self.text_until = time.time() + (10 if kind == "said" else 5)
         self.state, self.frame = ("forge" if kind == "done" else "idle"), 0
 
     # -- talk to him ---------------------------------------------------------------------------

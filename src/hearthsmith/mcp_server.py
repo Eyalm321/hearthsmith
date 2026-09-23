@@ -52,6 +52,20 @@ def hearthsmith_tasks_add(title: str, due: str | None = None, project: str | Non
 
 
 @mcp.tool()
+def hearthsmith_tasks_hand(task_id: str) -> str:
+    """Hand a task to a Claude agent in a hyperpanes pane (one already on that work in the
+    task's project, else a new pane in the project folder). The task goes to 'delegated'; when
+    the agent goes quiet, its report is appended to the task's notes and the task reopens for
+    the user to check."""
+    from hearthsmith.handoff import hand
+    t = store().get(task_id)
+    if not t:
+        return json.dumps({"error": "no such task", "task_id": task_id})
+    h = hand(config.load(), store(), t)
+    return json.dumps({"ok": h.ok, "text": h.text, "pane_id": h.pane_id, "steps": h.steps})
+
+
+@mcp.tool()
 def hearthsmith_tasks_split(task_id: str) -> str:
     """Break a task into 3-7 steps (the compose model proposes them; they're added as its
     steps). The nags then name the next open step instead of the whole task."""

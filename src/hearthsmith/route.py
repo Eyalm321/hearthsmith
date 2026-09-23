@@ -115,6 +115,11 @@ SPLIT_ASK = re.compile(r"^\s*(?:(?:can|could)\s+you\s+)?(?:please\s+)?"
                        r"(?:break\s+(?:down|up)|split(?:\s+up)?|plan\s+out|chunk)\s+(?:the\s+task\s+)?"
                        r"|\s+into\s+(?:smaller\s+)?(?:steps|pieces|chunks|subtasks)\s*[.?!]*$",
                        re.IGNORECASE)
+# "hand the changelog to an agent", "let an agent do the invoice" — a task already on the ledger
+HANDOFF_ASK = re.compile(r"\b(?:hand|give|pass|send|delegate)\s+(?P<a>.+?)\s+(?:off\s+)?to\s+(?:an?\s+|the\s+)?"
+                         r"(?:agent|claude|worker)\b"
+                         r"|\b(?:let|have|get)\s+(?:an?\s+|the\s+)?(?:agent|claude)\s+(?:do|handle|take|finish)\s+"
+                         r"(?P<b>.+)$", re.IGNORECASE)
 WANTS_AGENT = re.compile(r"\b(?:claude|agent)\b", re.IGNORECASE)
 TERMINALS = ("ptyxis", "gnome-terminal", "kgx", "foot", "konsole", "alacritty", "kitty", "xterm")
 
@@ -343,6 +348,16 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
             return Reply(intent, f"Done — {b.window}." if b.window else "Done.", raw={**raw, "steps": b.steps})
         return Reply(intent, f"Couldn't finish ({b.note}). Was in {b.window or 'nowhere'}.",
                      raw={**raw, "steps": b.steps})
+    if (m := HANDOFF_ASK.search(text)) and not when.REMINDER.match(text):
+        from hearthsmith.handoff import hand
+        what = (m.group("a") or m.group("b") or "").strip(" .?!")
+        t = store.get(a["task"]["choice"]) if "task" in a else None
+        if t is None or not _same_thing(what, t.title):
+            t = next((x for x in tasks if _same_thing(what, x.title)), None)
+        if t is not None:
+            h = hand(cfg, store, t, hp)
+            return Reply("pane", h.text, t.id, h.pane_id, raw)
+
     if SPLIT_ASK.search(text) and not when.REMINDER.match(text):
         from hearthsmith.steps import split
         what = SPLIT_ASK.sub("", text).strip(" .?!")
@@ -421,18 +436,16 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
                              target=pane_id)
             return Reply(intent, f"Opened a {'claude pane' if with_claude else 'terminal'} "
                          f"in {where}.", None, pane_id, raw)
-        pane_id = hp.new_pane(command=exe, cwd=cwd, label=_label(brief))
+        from hearthsmith.handoff import start_agent
+        pane_id, briefed, steps = start_agent(hp, cwd, _label(brief), brief)
         if not pane_id:
             intent = "pane"          # couldn't open one; fall through to an existing pane
         else:
             t = store.add(brief)
             store.set_state(t.id, "delegated")
-            hp.answer_trust(pane_id)          # nothing is accepted until the folder is trusted
-            ready = hp.wait_ready(pane_id)
-            if ready and hp.type_into(pane_id, brief, user_originated=True):
-                store.record_run(brief, "spawn", True,
-                                 [f"opened a pane in {cwd}", "answered the folder-trust prompt",
-                                  "typed the assignment"], task_id=t.id, target=pane_id)
+            ready = briefed or "not sent" not in steps[-1]
+            if briefed:
+                store.record_run(brief, "spawn", True, steps, task_id=t.id, target=pane_id)
                 if researching:
                     store.watch(pane_id, text, t.id)
                     return Reply("research", "Put an agent on it — I'll bring the answer back "

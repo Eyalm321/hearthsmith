@@ -24,7 +24,7 @@ from hearthsmith import config
 from hearthsmith.compose import _ollama, _openrouter, _trim
 from hearthsmith.store import Store, Task
 
-AGENT_BODIES = ("research", "spawn", "pane")
+AGENT_BODIES = ("research", "spawn", "pane", "agent")
 
 
 def kind_for(now: datetime) -> str:

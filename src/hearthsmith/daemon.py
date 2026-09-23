@@ -71,17 +71,27 @@ def collect_research(cfg: config.Config, store: Store, hp: Hyperpanes,
         still = store.touch_watch(w["pane_id"], digest)
         if pane.activity == "busy" or still < settle_s:
             continue
-        answer = hp.last_answer(w["pane_id"])
+        from hearthsmith.handoff import transcript_answer
+        # the first words it was typed: a hand-off's brief opens with the ledger line
+        opened = (f"Task from my hearthsmith ledger: {w['question']}" if w.get("kind") == "task"
+                  else w["question"])
+        answer = transcript_answer(pane.cwd, opened, w["started_at"]) or hp.last_answer(w["pane_id"])
         if len(answer) < 40:
             continue
         store.unwatch(w["pane_id"])
+        handed = w.get("kind") == "task"
         if w["task_id"]:
-            store.set_state(w["task_id"], "done")
-            store.db.execute("UPDATE tasks SET notes=notes||? WHERE id=?",
-                             (f"\n\nanswer: {answer}", w["task_id"]))
-        store.record_run(w["question"], "research", True, ["asked an agent", "collected its answer"],
+            # a research answer closes its question; an agent's report on a task hands it back
+            # to you to check and tick off — "I'm done" from an agent isn't done yet
+            note = (f"\n\n{'agent' if handed else 'answer'} "
+                    f"({datetime.now():%m-%d %H:%M}): {answer}")
+            store.db.execute("UPDATE tasks SET notes=notes||? WHERE id=?", (note, w["task_id"]))
+            store.set_state(w["task_id"], "open" if handed else "done")
+        store.record_run(w["question"], "agent" if handed else "research", True,
+                         ["asked an agent", "collected its " + ("report" if handed else "answer")],
                          task_id=w["task_id"], target=w["pane_id"], started_at=w["started_at"])
-        done.append({"question": w["question"], "answer": answer, "pane": w["pane_id"]})
+        done.append({"question": w["question"], "answer": answer, "pane": w["pane_id"],
+                     "task_id": w["task_id"], "kind": w.get("kind", "research")})
     return done
 
 
@@ -285,7 +295,9 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
     voice = VoiceSink(cfg.voice)
     # an answer you asked for outranks a reminder you didn't
     for found in collect_research(cfg, store, hp):
-        text = f"Your answer on '{found['question'][:60]}': {found['answer'][:400]}"
+        text = (f"The agent's back on '{found['question'][:60]}': {found['answer'][:400]} "
+                "Tick it off if it holds." if found["kind"] == "task" else
+                f"Your answer on '{found['question'][:60]}': {found['answer'][:400]}")
         if not dry:
             if not sprite.send(text, "soon", None):
                 NotifySink().send(text, "soon", None)

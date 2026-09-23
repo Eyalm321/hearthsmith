@@ -35,6 +35,7 @@ def main() -> None:
     sn = sub.add_parser("snooze"); sn.add_argument("task_id"); sn.add_argument("--minutes", type=int, default=120)
     sub.add_parser("state", help="print the T0 state paragraph the decider sees")
     sub.add_parser("nags")
+    hd = sub.add_parser("hand", help="hand a task to a Claude agent; its report comes back to the task"); hd.add_argument("task_id"); hd.add_argument("--back", action="store_true", help="take it back: stop waiting on the agent")
     spl = sub.add_parser("split", help="break a task into steps (compose model)"); spl.add_argument("task_id")
     bf = sub.add_parser("brief", help="where things stand: morning brief / evening wrap"); bf.add_argument("kind", nargs="?", choices=["morning", "evening"]); bf.add_argument("--dry", action="store_true", help="print only; don't count it as today's"); bf.add_argument("--deliver", action="store_true", help="on the sprite + voice, like the scheduled one"); bf.add_argument("--json", action="store_true")
     sub.add_parser("suggestions", help="what the Claude panes are offering to do next")
@@ -92,6 +93,21 @@ def main() -> None:
             if b["text"] and not args.deliver and not args.dry:
                 from hearthsmith.voice import Voice
                 Voice(cfg.voice).speak(b["text"])
+    elif args.cmd == "hand":
+        from hearthsmith.handoff import hand, take_back
+        t = store.get(args.task_id)
+        if not t:
+            raise SystemExit("no such task")
+        if args.back:
+            take_back(store, t)
+            print(f"'{t.title}' is yours again.")
+        else:
+            h = hand(cfg, store, t)
+            print(h.text)
+            for s in h.steps:
+                print("  ", s)
+            if not h.ok:
+                raise SystemExit(1)
     elif args.cmd == "split":
         from hearthsmith.steps import split
         t = store.get(args.task_id)
