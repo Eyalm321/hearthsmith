@@ -26,7 +26,7 @@ import httpx
 from typesafe_sdk import Choice, Noul
 
 from hearthsmith import answer as answer_mod
-from hearthsmith import config
+from hearthsmith import config, when
 from hearthsmith.adapters import markdown
 from hearthsmith.adapters.hyperpanes import Hyperpanes, Snapshot
 from hearthsmith.compose import _ollama, _openrouter, _trim
@@ -250,10 +250,14 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         intent = a["intent"]["choice"]
         conf = a["intent"].get("probabilities", {}).get(intent, 0)
     except Exception as e:  # noqa: BLE001 — no decider → store it, never lose the input
-        t = store.add(text)
-        return Reply("add", f"Noted '{text}'. (decider down: {type(e).__name__})", t.id)
+        title, due = when.parse(text)
+        t = store.add(title, due=due)
+        return Reply("add", f"Noted '{title}'" + (f", {when.describe(due)}" if due else "")
+                     + f". (decider down: {type(e).__name__})", t.id)
 
     raw = {"answers": a}
+    if when.REMINDER.match(text):
+        intent = "add"            # "remind me to research X" is for later, not for now
     # A question about the world is not a question for him: if it wants a fact that lives on a
     # page, go and read the page instead of answering from memory. This overrides the intent
     # whenever the alternative is him talking (or a task match that never happened) — those
@@ -310,12 +314,18 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         return Reply(intent, f"Couldn't finish ({b.note}). Was in {b.window or 'nowhere'}.",
                      raw={**raw, "steps": b.steps})
     if intent == "add":
-        due_i = int(a["due"]["choice"]); due = int(time.time() + DUE_SECS[due_i]) if DUE_SECS[due_i] else None
+        # A date he actually said beats the decider's bucket; the bucket is for "soonish".
+        title, due = when.parse(text)
+        if due is None:
+            due_i = int(a["due"]["choice"])
+            due = int(time.time() + DUE_SECS[due_i]) if DUE_SECS[due_i] else None
         project = a["project"]["choice"] if "project" in a and a["project"].get("confidence", 0) > 0.5 else None
-        t = store.add(text, due=due, project=project)
-        line = _say(cfg.compose, f"The user just asked you to remember: '{text}' (due: {DUE[due_i]}).",
-                    "Confirm in one short line, in character.") or f"Noted: {text} ({DUE[due_i]})."
-        return Reply(intent, line, t.id, raw=raw)
+        t = store.add(title, due=due, project=project)
+        said = when.describe(due)
+        line = _say(cfg.compose, f"The user just asked you to remember: '{title}' (due: {said}).",
+                    "Confirm in one short line, in character, and say exactly when it's due.") \
+            or f"Noted: {title} ({said})."
+        return Reply(intent, line, t.id, raw={**raw, "due": due})
 
     if intent in ("spawn", "pane") and not _brief(text):
         intent = "spawn"          # nothing to hand to anyone — he only asked for a pane

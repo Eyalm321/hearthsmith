@@ -32,6 +32,12 @@ hearthsmith state            # the exact paragraph the decider sees
 hearthsmithd --once --dry    # decide + compose, deliver nothing
 ```
 
+Tell him a reminder the way you'd say it — "remind me to call the vet friday at 5pm", "don't let
+me forget rent tomorrow morning", "in 20 minutes take the bread out" — and it lands on the ledger
+as *call the vet*, due Fri 17:00, and he says the time back. Dates are read locally
+(`src/hearthsmith/when.py`, no model); a day with no time is due by 18:00 that day. Only when you
+name no time at all does the decider guess one. The ledger's add box reads the same words.
+
 Ask him a question and he answers it rather than reporting that a page was opened. One page
 holds it ("what does the P2S cost") → he opens the page and reads it, a couple of seconds, and
 says so plainly when the page doesn't actually contain it. It needs comparing sources ("what do

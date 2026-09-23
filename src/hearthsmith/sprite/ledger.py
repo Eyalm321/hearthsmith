@@ -1,7 +1,8 @@
 """The ledger: his task list as a window. Same store the heartbeat and the MCP server use, read
 straight from SQLite, so a task an agent adds over MCP shows up here within a couple of seconds.
 
-Add box takes the tasks.md syntax (`title @due(2026-09-25T18:00) +project #tag`). Tick = done,
+Add box takes the tasks.md syntax (`title @due(2026-09-25T18:00) +project #tag`) or plain
+words ("call the vet friday 5pm", see when.py). Tick = done,
 click a row = its notes and what he did about it, ⋯ = edit / snooze / block / delete.
 
 Lives in the sprite process (system python, GTK3): right click him → Ledger, or middle click.
@@ -23,7 +24,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from hearthsmith import config
+from hearthsmith import config, when
 from hearthsmith.adapters.markdown import parse_line
 from hearthsmith.store import Store, Task
 
@@ -154,7 +155,7 @@ class Ledger(Gtk.Window):
         root.pack_start(tabs, False, False, 0)
 
         self.entry = Gtk.Entry()
-        self.entry.set_placeholder_text("New task…  @due(2026-09-25T18:00) +project #tag")
+        self.entry.set_placeholder_text("New task…  call the vet friday 5pm +project #tag")
         self.entry.connect("activate", self._on_add)
         root.pack_start(self.entry, False, False, 0)
 
@@ -340,6 +341,8 @@ class Ledger(Gtk.Window):
             e.get_style_context().add_class("overdue")  # bad @due(...) date
             return
         e.get_style_context().remove_class("overdue")
+        if due is None:
+            title, due = when.parse(title)     # "call the vet friday 5pm" works here too
         if title:
             t = self.store.add(title, due=due, project=project, tags=tags)
             self.on_event("added", t)
