@@ -224,11 +224,13 @@ def _where(cfg: config.Config, brief: str, workdir: str, snap, hp) -> tuple[str,
 STOP = {"the", "a", "an", "to", "of", "for", "and", "my", "on", "in", "with", "into", "steps", "it"}
 
 
+def _stems(x: str) -> set[str]:
+    return {w[:5] for w in re.findall(r"[a-z0-9]+", x.lower()) if w not in STOP}
+
+
 def _same_thing(said: str, title: str) -> bool:
     """Most of the task's words are in what was said (stems, so 'launching' finds 'launch')."""
-    def stems(x: str) -> set[str]:
-        return {w[:5] for w in re.findall(r"[a-z0-9]+", x.lower()) if w not in STOP}
-    have, want = stems(said), stems(title)
+    have, want = _stems(said), _stems(title)
     return bool(want) and len(have & want) * 2 >= len(want)
 
 
@@ -282,6 +284,81 @@ RESCHEDULE = re.compile(r"^\s*(?:(?:can|could)\s+you\s+)?(?:please\s+)?(?:actual
                         re.IGNORECASE)
 
 
+# "change the coffee task to have no project", "put it under +web", "rename X to Y"
+_VERB = r"(?:change|set|update|edit|make|move|put|file|switch|fix)"
+_TASK = r"(?:the\s+)?(?:task\s+(?:for\s+|about\s+|to\s+)?|one\s+(?:for|about)\s+)?"
+NO_PROJECT = re.compile(
+    rf"^\s*(?:please\s+)?(?:{_VERB}\s+{_TASK}(?P<a>.+?)\s+(?:to\s+)?(?:have|with|has)\s+no\s+project"
+    rf"|(?:remove|drop|clear|take)\s+(?:the\s+)?project\s+(?:from|off|of)\s+{_TASK}(?P<b>.+?)"
+    rf"|(?:take|move)\s+{_TASK}(?P<c>.+?)\s+out\s+of\s+(?:the\s+|its\s+)?project(?:\s+\S+)?"
+    rf"|{_TASK}(?P<d>.+?)\s+(?:shouldn'?t|should\s+not|doesn'?t|does\s+not)\s+(?:have|belong\s+to|be\s+in)\s+(?:a|any)\s+project)"
+    rf"\s*[.!]*$", re.IGNORECASE)
+SET_PROJECT = re.compile(
+    rf"^\s*(?:please\s+)?(?:{_VERB}\s+{_TASK}(?P<a>.+?)\s+(?:to|under|in|into|onto)\s+(?:the\s+)?"
+    rf"(?:project\s+\+?(?P<p1>\S+)|\+(?P<p2>\S+)|(?P<p3>\S+)\s+project)"
+    rf"|{_VERB}\s+(?:the\s+)?project\s+(?:of|for|on)\s+{_TASK}(?P<b>.+?)\s+to\s+\+?(?P<p4>\S+))\s*[.!]*$",
+    re.IGNORECASE)
+RENAME = re.compile(rf"^\s*(?:please\s+)?(?:rename\s+{_TASK}(?P<a>.+?)\s+(?:to|as)\s+"
+                    rf"|(?:change|set)\s+the\s+(?:title|name)\s+of\s+{_TASK}(?P<b>.+?)\s+to\s+)"
+                    rf"[\"'“]?(?P<new>.+?)[\"'”]?\s*[.!]*$", re.IGNORECASE)
+
+
+def _target(what: str, store: Store, tasks: list, last: str | None):
+    """The task meant: "it"/"that" is the one just discussed, else the one sharing most words."""
+    from hearthsmith import convo
+    what = what.strip(" .'\"")
+    if last and (convo.refers_back(what) or not what) and (t := store.get(last)):
+        return t
+    # the other way round from _same_thing: most of what was *said* is in the title, so "the
+    # coffee task" finds "get quote out to coffee parts website"
+    said = _stems(what) - {"task", "one"}
+    if not said:
+        return None
+    scored = sorted(((len(said & _stems(t.title)), t) for t in tasks), key=lambda x: -x[0])
+    best = [t for n, t in scored if n == scored[0][0] and n * 2 >= len(said)] if scored else []
+    return best[0] if len(best) == 1 else None          # two equally good: don't guess
+
+
+def _edit(text: str, store: Store, tasks: list, last: str | None, projects: list[str]) -> Reply | None:
+    """Changing a task already on the ledger — never adding a new one for it."""
+    if m := NO_PROJECT.match(text):
+        what = next(g for g in m.groups() if g is not None)
+        if t := _target(what, store, tasks, last):
+            store.edit(t.id, project=None)
+            return Reply("edit", f"'{t.title}' — no project now.", t.id)
+        return Reply("edit", f"Couldn't find a task matching '{what}'.")
+    if m := SET_PROJECT.match(text):
+        what = m["a"] or m["b"]
+        proj = (m["p1"] or m["p2"] or m["p3"] or m["p4"]).strip(" .+")
+        proj = next((p for p in projects if p.lower() == proj.lower()), proj)
+        if t := _target(what, store, tasks, last):
+            store.edit(t.id, project=proj)
+            return Reply("edit", f"'{t.title}' — now under {proj}.", t.id)
+        return Reply("edit", f"Couldn't find a task matching '{what}'.")
+    if m := RENAME.match(text):
+        what = m["a"] or m["b"]
+        if t := _target(what, store, tasks, last):
+            store.edit(t.id, title=m["new"].strip())
+            return Reply("edit", f"Renamed to '{m['new'].strip()}'.", t.id)
+        return Reply("edit", f"Couldn't find a task matching '{what}'.")
+    return None
+
+
+def _named_project(text: str, projects: list[str]) -> str | None:
+    """A project the user actually named ("+web", "for the sunsations website project", or the
+    project's own name in the sentence). The decider's guess alone doesn't file a task: it put
+    'get a quote from the coffee parts site' under sunsations-website."""
+    low = text.lower()
+    for p in sorted(projects, key=len, reverse=True):
+        pl = p.lower()
+        if f"+{pl}" in low or re.search(rf"(?<![\w-]){re.escape(pl)}(?![\w-])", low):
+            return p
+        spaced = pl.replace("-", " ").replace("_", " ")
+        if spaced != pl and re.search(rf"\b{re.escape(spaced)}\b", low):
+            return p
+    return None
+
+
 def _reschedule(text: str, store: Store, tasks: list, last: str | None) -> Reply | None:
     """A new date for a task already on the ledger — "it" being the one just talked about."""
     from hearthsmith import convo
@@ -327,6 +404,9 @@ def _route(text: str, cfg: config.Config, store: Store, quick: bool = False,
     if calendar.wants(text) and not when.REMINDER.match(text):
         return Reply("calendar", calendar.answer(cfg.calendar, text))
 
+    projects = [p["name"] for p in (snap.projects if snap else [])]
+    if r := _edit(text, store, tasks, last, projects):
+        return r
     if r := _reschedule(text, store, tasks, last):
         return r
 
@@ -475,7 +555,7 @@ def _route(text: str, cfg: config.Config, store: Store, quick: bool = False,
         if due is None:
             due_i = int(a["due"]["choice"])
             due = int(time.time() + DUE_SECS[due_i]) if DUE_SECS[due_i] else None
-        project = a["project"]["choice"] if "project" in a and a["project"].get("confidence", 0) > 0.5 else None
+        project = _named_project(text, [p["name"] for p in (snap.projects if snap else [])])
         t = store.add(title, due=due, project=project, repeat=repeat)
         said = when.describe(due) + (f"; it repeats {when.describe_rule(repeat)}" if repeat else "")
         if quick:
