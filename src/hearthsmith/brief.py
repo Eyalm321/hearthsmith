@@ -66,6 +66,9 @@ def facts(store: Store, kind: str, now: datetime | None = None) -> dict:
         "waiting_on_you": [f"'{s['label']}' wants to: {s['text'][:100]}" for s in store.suggestions()
                            if s["state"] == "reported"],
     }
+    from hearthsmith.memory import Memory
+    if focus := Memory(store).rules().get("focus"):
+        out["focus"] = focus
     if kind == "evening":
         out["due_tomorrow"] = [t.title for t in open_ if within(t, tomorrow, tomorrow + timedelta(days=1))]
         out["added_today"] = len([t for t in store.list(None) if t.created_at >= today.timestamp()])

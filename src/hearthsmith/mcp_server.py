@@ -185,6 +185,31 @@ def hearthsmith_brief(kind: str | None = None) -> str:
 
 
 @mcp.tool()
+def hearthsmith_memory_list() -> str:
+    """What hearthsmith knows about the user: things they told it (with any rule it obeys —
+    quiet hours, muted topics, this week's focus) and habits it noticed from the ledger."""
+    from hearthsmith.memory import Memory, noticed
+    return json.dumps({"told": Memory(store()).items(), "noticed": noticed(store())}, indent=1)
+
+
+@mcp.tool()
+def hearthsmith_memory_add(text: str) -> str:
+    """Remember something about the user, in their words: "no nags before 10", "don't nag me
+    about email", "the site launch matters most this week", "I work best in the evening".
+    Quiet hours, weekends, muted topics and focus become rules; anything else shapes the tone."""
+    from hearthsmith.memory import Memory, confirm
+    row = Memory(store()).add(text)
+    return json.dumps({**row, "reply": confirm(row)})
+
+
+@mcp.tool()
+def hearthsmith_memory_forget(id_or_words: str) -> str:
+    """Forget a memory by id, or the one sharing most words with what's given."""
+    from hearthsmith.memory import Memory
+    return json.dumps({"forgot": Memory(store()).forget(id_or_words)})
+
+
+@mcp.tool()
 def hearthsmith_nags_recent(n: int = 5) -> str:
     """What the blacksmith said recently, with the decision that drove it."""
     return json.dumps(store().recent_nags(n), indent=1)

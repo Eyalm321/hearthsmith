@@ -24,8 +24,10 @@ log = logging.getLogger("hearthsmith")
 def build_state(store: Store, hp: Hyperpanes, cfg: config.Config) -> tuple[str, list[Task]]:
     """T0: the dense paragraph every backend reads. No model."""
     markdown.sync(cfg.nag.markdown_file, store)
+    from hearthsmith.memory import Memory
     from hearthsmith.steps import actionable
-    tasks = actionable(store, [t for t in store.list("open") if not t.snoozed])
+    mem = Memory(store)
+    tasks = mem.shape(actionable(store, [t for t in store.list("open") if not t.snoozed]))
     now = time.time()
     lines = [f"Local time {datetime.now():%A %H:%M}."]
     snap = hp.snapshot()
@@ -37,19 +39,30 @@ def build_state(store: Store, hp: Hyperpanes, cfg: config.Config) -> tuple[str, 
             if t.due:
                 h = (t.due - now) / 3600
                 due = f" — overdue by {-h:.0f}h" if h < 0 else f" — due in {h:.0f}h"
-            proj = f" [{t.project}]" if t.project else ""
+            proj = (f" [{t.project}]" if t.project else "") + (" [FOCUS]" if mem.focused(t) else "")
             nag = f" (nagged {t.nag_count}x)" if t.nag_count else ""
             lines.append(f"  - {t.title}{proj}{due}{nag}")
     else:
         lines.append("No open tasks.")
     last = store.last_nag_at()
     lines.append("Last nag: " + (f"{(now - last) / 60:.0f} min ago." if last else "never."))
+    if about := mem.paragraph():
+        lines.append(about)
     return "\n".join(lines), tasks
 
 
-def in_quiet_hours(cfg: config.NagCfg) -> bool:
+def in_quiet_hours(cfg: config.NagCfg, store: Store | None = None,
+                   now: datetime | None = None) -> bool:
+    """Config quiet hours, as tightened by what you told him ("no nags before 10", weekends)."""
+    now = now or datetime.now()
     start, end = cfg.quiet_hours
-    h = datetime.now().hour
+    if store is not None:
+        from hearthsmith.memory import Memory
+        mem = Memory(store)
+        if mem.weekend_off(now):
+            return True
+        start, end = mem.quiet_hours((start, end))
+    h = now.hour
     return (start <= h or h < end) if start > end else (start <= h < end)
 
 
@@ -319,7 +332,7 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
 
     # once a day each: where things stand, at the first heartbeat you're there for. Muted or
     # quiet hours hold it (not skip it) — the next heartbeat inside the window still owes it.
-    if not force and not in_quiet_hours(cfg.nag) \
+    if not force and not in_quiet_hours(cfg.nag, store) \
             and int(store.kv_get("muted_until", "0") or 0) <= time.time():
         from hearthsmith import brief
         if kind := brief.due_now(cfg.brief, store, idle=brief.idle_ms()):
@@ -338,7 +351,7 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
         if muted > time.time():
             sprite.write("sleep")
             return {"skipped": "muted", "until": muted}
-        if in_quiet_hours(cfg.nag):
+        if in_quiet_hours(cfg.nag, store):
             sprite.write("sleep")
             return {"skipped": "quiet_hours"}
         if last and time.time() - last < cfg.nag.min_gap_minutes * 60:

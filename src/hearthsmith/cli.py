@@ -35,6 +35,7 @@ def main() -> None:
     sn = sub.add_parser("snooze"); sn.add_argument("task_id"); sn.add_argument("--minutes", type=int, default=120)
     sub.add_parser("state", help="print the T0 state paragraph the decider sees")
     sub.add_parser("nags")
+    me = sub.add_parser("memory", help="what he knows about you: list / add \"...\" / forget <id or words>"); me.add_argument("action", nargs="?", default="list", choices=["list", "add", "forget"]); me.add_argument("text", nargs="*")
     hd = sub.add_parser("hand", help="hand a task to a Claude agent; its report comes back to the task"); hd.add_argument("task_id"); hd.add_argument("--back", action="store_true", help="take it back: stop waiting on the agent")
     spl = sub.add_parser("split", help="break a task into steps (compose model)"); spl.add_argument("task_id")
     bf = sub.add_parser("brief", help="where things stand: morning brief / evening wrap"); bf.add_argument("kind", nargs="?", choices=["morning", "evening"]); bf.add_argument("--dry", action="store_true", help="print only; don't count it as today's"); bf.add_argument("--deliver", action="store_true", help="on the sprite + voice, like the scheduled one"); bf.add_argument("--json", action="store_true")
@@ -93,6 +94,21 @@ def main() -> None:
             if b["text"] and not args.deliver and not args.dry:
                 from hearthsmith.voice import Voice
                 Voice(cfg.voice).speak(b["text"])
+    elif args.cmd == "memory":
+        from hearthsmith.memory import Memory, confirm, noticed
+        mem = Memory(store)
+        if args.action == "add":
+            print(confirm(mem.add(" ".join(args.text))))
+        elif args.action == "forget":
+            gone = mem.forget(" ".join(args.text))
+            print("\n".join(f"forgot {g['id']}  {g['text']}" for g in gone) or "nothing matched")
+        else:
+            for m in mem.items():
+                until = f"  (through {datetime.fromtimestamp(m['expires_at'] - 1):%a %d %b})" if m["expires_at"] else ""
+                rule = "" if m["rule"] == "{}" else f"  {m['rule']}"
+                print(f"{m['id']}  {m['text']}{until}{rule}")
+            for n in noticed(store):
+                print(f"  noticed: {n}")
     elif args.cmd == "hand":
         from hearthsmith.handoff import hand, take_back
         t = store.get(args.task_id)

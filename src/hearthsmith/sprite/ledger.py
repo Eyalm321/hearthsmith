@@ -63,7 +63,8 @@ CSS = b"""
 #ledger check:checked { background: #ff9a2e; border-color: #ff9a2e; }
 """
 
-TABS = (("open", "Open"), ("delegated", "Agents"), ("blocked", "Blocked"), ("done", "Done"))
+TABS = (("open", "Open"), ("delegated", "Agents"), ("blocked", "Blocked"), ("done", "Done"),
+        ("memory", "Memory"))
 
 
 def _when(ts: int) -> str:
@@ -109,6 +110,8 @@ class Ledger(Gtk.Window):
     def __init__(self, store: Store | None = None, on_event: Callable[[str, Task], None] | None = None):
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         self.store = store or Store(config.load().db_path)
+        from hearthsmith.memory import Memory
+        self.memory = Memory(self.store)
         self.on_event = on_event or (lambda *_: None)
         self.tab = "open"
         self.expanded: set[str] = set()
@@ -186,8 +189,9 @@ class Ledger(Gtk.Window):
         # updated_at moves on every edit/state change, and the runs table on every errand; a
         # delete only moves the count. Cheap enough to ask every 1.5s.
         r = self.store.db.execute("SELECT COUNT(*), MAX(updated_at) FROM tasks").fetchone()
+        mem = self.store.db.execute("SELECT COUNT(*), MAX(created_at) FROM memory").fetchone()
         n = self.store.db.execute("SELECT MAX(at) FROM runs").fetchone()
-        return (tuple(r), n[0], self.tab, frozenset(self.expanded))
+        return (tuple(r), tuple(mem), n[0], self.tab, frozenset(self.expanded))
 
     def _poll(self) -> bool:
         if (self.get_visible() and self.editing is None and self.adding_step is None
@@ -204,6 +208,13 @@ class Ledger(Gtk.Window):
         n_agents = len(self.store.list("delegated"))
         self.count.set_text(f"{n_open} open" + (f" · {n_over} overdue" if n_over else "")
                             + (f" · {n_agents} with agents" if n_agents else ""))
+        self.entry.set_placeholder_text(
+            "Tell him about you…  no nags before 10 · focus on web this week" if self.tab == "memory"
+            else "New task…  call the vet friday 5pm +project #tag")
+        if self.tab == "memory":
+            self._memory_rows()
+            self.list.show_all()
+            return
         tasks = self.store.list(self.tab)
         if self.tab == "open":
             ids = {t.id for t in tasks}
@@ -236,6 +247,54 @@ class Ledger(Gtk.Window):
         self.list.show_all()
 
     # -- rows ----------------------------------------------------------------------------------
+
+    def _memory_rows(self) -> None:
+        from hearthsmith.memory import noticed
+
+        def head(text):
+            lab = Gtk.Label(label=text, xalign=0)
+            lab.get_style_context().add_class("section")
+            self.list.add(self._plain_row(lab))
+
+        items = self.memory.items()
+        head("WHAT YOU'VE TOLD HIM")
+        if not items:
+            lab = Gtk.Label(label="Nothing yet.", xalign=0)
+            lab.get_style_context().add_class("detail")
+            self.list.add(self._plain_row(lab))
+        for m in items:
+            line = Gtk.Box(spacing=8)
+            line.set_margin_start(14)
+            line.set_margin_end(8)
+            line.set_margin_top(3)
+            line.set_margin_bottom(3)
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            t = Gtk.Label(label=m["text"], xalign=0)
+            t.set_line_wrap(True)
+            col.pack_start(t, False, False, 0)
+            rule = json.loads(m["rule"])
+            bits = [f"{k.replace('_', ' ')}: {v}" for k, v in rule.items()]
+            if m["expires_at"]:
+                bits.append(f"through {datetime.fromtimestamp(m['expires_at'] - 1):%a %d %b}")
+            if bits:
+                meta = Gtk.Label(label="  ".join(bits), xalign=0)
+                meta.get_style_context().add_class("meta")
+                col.pack_start(meta, False, False, 0)
+            line.pack_start(col, True, True, 0)
+            x = Gtk.Button(label="×")
+            x.get_style_context().add_class("flat")
+            x.set_valign(Gtk.Align.START)
+            x.set_tooltip_text("Forget this")
+            x.connect("clicked", lambda _b, i=m["id"]: (self.memory.forget(i), self.refresh()))
+            line.pack_start(x, False, False, 0)
+            self.list.add(self._plain_row(line))
+        if seen := noticed(self.store):
+            head("WHAT HE'S NOTICED")
+            for n in seen:
+                lab = Gtk.Label(label=n, xalign=0)
+                lab.set_line_wrap(True)
+                lab.get_style_context().add_class("detail")
+                self.list.add(self._plain_row(lab))
 
     def _plain_row(self, child: Gtk.Widget) -> Gtk.ListBoxRow:
         r = Gtk.ListBoxRow()
@@ -380,6 +439,13 @@ class Ledger(Gtk.Window):
     def _on_add(self, e: Gtk.Entry) -> None:
         text = e.get_text().strip()
         if not text:
+            return
+        if self.tab == "memory":
+            from hearthsmith.memory import confirm
+            said = confirm(self.memory.add(text))
+            self.on_event("said", Task(id="", title=said))
+            e.set_text("")
+            self.refresh()
             return
         try:
             title, due, project, tags, repeat = parse_line(text)

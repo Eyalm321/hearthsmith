@@ -58,6 +58,17 @@ to the task's notes, puts the task back in Open marked *agent reported — check
 you. He doesn't tick it off for you. *Take back* (or `hearthsmith hand --back <id>`) stops
 waiting on the agent.
 
+He **remembers you**. Tell him how you work — "I don't want nags before 10", "don't nag me
+about email", "the site launch matters most this week", "weekends are mine", "I work best in
+the evenings" — and he keeps it. The ones with a plain meaning become rules he obeys: quiet
+hours tightened (the morning brief waits too), whole weekends off, a topic never nagged about
+(it stays on the ledger), a focus whose tasks come first until it expires. Everything else goes
+into what the decider and his voice read. He also notices, from the store: the hours you actually
+finish things, and tasks nagged about again and again without moving — for those he suggests
+splitting or handing off instead of repeating himself. "What do you know about me", "forget
+that…", the ledger's **Memory** tab (× to forget), `hearthsmith memory [add|forget]`, and
+`hearthsmith_memory_list / _add / _forget` over MCP.
+
 Twice a day he tells you where things stand. The **morning brief** (from 08:30): what landed
 overnight — answers, agents that finished or didn't — what's overdue, what's due today, what's
 stuck, which panes are waiting on a yes. The **evening wrap** (from 18:30): what you struck off,
@@ -99,7 +110,7 @@ Same `Noul` / `Score` / `Choice` questions in every backend — swapping is a co
 claude mcp add hearthsmith -- $(pwd)/.venv/bin/hearthsmith-mcp
 ```
 
-Tools: `hearthsmith_tasks_list / _get / _add / _edit / _done / _reopen / _block / _snooze / _delete / _split / _hand`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
+Tools: `hearthsmith_tasks_list / _get / _add / _edit / _done / _reopen / _block / _snooze / _delete / _split / _hand`, `hearthsmith_memory_list / _add / _forget`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
 
 ## tasks.md
 

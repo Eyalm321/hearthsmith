@@ -46,6 +46,8 @@ INTENTS = {
     "done": "the user is saying an existing task is finished",
     "snooze": "the user wants to be left alone about an existing task for a while",
     "nag": "the user is asking what they should be doing / wants a status check",
+    "remember": "a fact or preference about the user themself — how or when they like to work or "
+                "be reminded, what they don't want to hear about, what matters most right now — not a task",
     "ask": "a remark, or a question answerable from what you already know — no looking anything up",
 }
 DUE = ["no deadline", "today", "tomorrow", "within this week", "next week or later"]
@@ -227,6 +229,26 @@ def _same_thing(said: str, title: str) -> bool:
     return bool(want) and len(have & want) * 2 >= len(want)
 
 
+def _memory_reply(text: str, intent: str, store: Store) -> tuple[str, str] | None:
+    """Told something about yourself, asked what he knows, or asked to forget: (intent, reply)."""
+    from hearthsmith.memory import FORGET, RECALL, Memory, confirm, is_memory
+    mem = Memory(store)
+    if RECALL.search(text):
+        told = [m["text"] for m in mem.items()]
+        from hearthsmith.memory import noticed
+        seen = noticed(store)
+        if not told and not seen:
+            return "remember", "Nothing yet. Tell me how you like to work and I'll keep it."
+        return "remember", " ".join([*(f"{x}." for x in told), *seen])[:600]
+    if (m := FORGET.match(text)) and (gone := mem.forget(m[1])):
+        return "remember", "Forgotten: " + "; ".join(g["text"] for g in gone) + "."
+    if when.REMINDER.match(text) or re.match(r"^\s*remember\s+to\b", text, re.IGNORECASE):
+        return None
+    if is_memory(text) or intent == "remember":
+        return "remember", confirm(mem.add(text))
+    return None
+
+
 def _label(brief: str) -> str:
     words = [w for w in re.split(r"\W+", brief) if len(w) > 3][:4]
     return " ".join(words)[:40] or "hearthsmith task"
@@ -283,6 +305,8 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
                      + f". (decider down: {type(e).__name__})", t.id)
 
     raw = {"answers": a}
+    if r := _memory_reply(text, intent, store):
+        return Reply(r[0], r[1], raw=raw)
     if BRIEF_ASK.search(text) and not when.REMINDER.match(text):
         from hearthsmith import brief
         started = time.time()
@@ -500,7 +524,8 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         return Reply(intent, out.get("text", "Nothing pressing. The bellows are quiet."), raw=raw)
 
     # ask / fallthrough
-    situation = (f"The user said: '{text}'.\nOpen tasks: " +
+    from hearthsmith.memory import Memory
+    situation = (f"The user said: '{text}'.\n{Memory(store).paragraph()}\nOpen tasks: " +
                  ("; ".join(t.title for t in tasks[:10]) or "none") +
                  (f"\nPanes: {', '.join(p.label for p in snap.panes)}" if snap else ""))
     line = _say(cfg.compose, situation, "Answer briefly, in character.") or "Aye."
