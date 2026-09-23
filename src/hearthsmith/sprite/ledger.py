@@ -112,6 +112,7 @@ class Ledger(Gtk.Window):
         self.store = store or Store(config.load().db_path)
         from hearthsmith.memory import Memory
         self.memory = Memory(self.store)
+        self.cfg = config.load()
         self.on_event = on_event or (lambda *_: None)
         self.tab = "open"
         self.expanded: set[str] = set()
@@ -385,6 +386,8 @@ class Ledger(Gtk.Window):
                                       (t.id,)).fetchone()
             bits.append(f"with an agent · {max(1, (int(time.time()) - w[0]) // 60)} min"
                         if w else "handed off")
+        elif t.state == "open" and self._stuck(t):
+            bits.append("<span foreground='#ff9a2e'>stuck — split it or hand it off? (⋯)</span>")
         elif t.state == "open" and (r := self.store.last_run(t.id)) and r["body"] == "agent":
             bits.append("<span foreground='#ff9a2e'>agent reported — check it</span>")
         if t.nag_count:
@@ -419,6 +422,8 @@ class Ledger(Gtk.Window):
             item("Add step…", lambda: setattr(self, "adding_step", t.id))
             item("Split into steps", lambda: self._split(t))
             item("Hand to agent", lambda: self._cli(t, "handing", "hand", t.id))
+            if self._stuck(t):
+                item("Leave it be (stop nagging)", lambda: self._decline(t))
         if t.state == "open":
             item("Snooze 1 hour", lambda: self.store.snooze(t.id, 60))
             item("Snooze till tomorrow 9:00", lambda: self.store.snooze(t.id, _tomorrow_9()))
@@ -507,6 +512,15 @@ class Ledger(Gtk.Window):
             if said := (out.stdout.strip().splitlines() or [""])[0]:
                 GLib.idle_add(self.on_event, "said", Task(id=t.id, title=said))
         threading.Thread(target=run, daemon=True).start()
+
+    def _decline(self, t: Task) -> None:
+        from hearthsmith.offer import decline
+        self.on_event("said", Task(id=t.id, title=decline(self.store, t)))
+
+    def _stuck(self, t: Task) -> bool:
+        from hearthsmith.offer import declined
+        return (t.nag_count >= self.cfg.nag.stuck_after and not t.parent_id
+                and not self.store.children(t.id) and not declined(self.store, t))
 
     def _on_row(self, _l, row) -> None:
         if tid := getattr(row, "task_id", None):

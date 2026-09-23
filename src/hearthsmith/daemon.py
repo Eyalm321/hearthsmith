@@ -27,7 +27,9 @@ def build_state(store: Store, hp: Hyperpanes, cfg: config.Config) -> tuple[str, 
     from hearthsmith.memory import Memory
     from hearthsmith.steps import actionable
     mem = Memory(store)
-    tasks = mem.shape(actionable(store, [t for t in store.list("open") if not t.snoozed]))
+    from hearthsmith.offer import declined
+    tasks = mem.shape(actionable(store, [t for t in store.list("open")
+                                         if not t.snoozed and not declined(store, t)]))
     now = time.time()
     lines = [f"Local time {datetime.now():%A %H:%M}."]
     snap = hp.snapshot()
@@ -398,7 +400,12 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
 
     # a step is named with its parent ("… (step of 'the launch')"), as the decider saw it
     said = next((t.title for t in tasks if t.id == task.id), task.title)
-    text, tier = compose(cfg.compose, state, said, d.urgency, want_llm=d.needs_llm >= 0.5)
+    from hearthsmith import offer
+    if offer.stuck(cfg, store, task):
+        # nagging hasn't moved it; offer to do something about it instead of saying it again
+        text, tier = offer.make(store, task, hp.snapshot(with_screens=False)), "offer"
+    else:
+        text, tier = compose(cfg.compose, state, said, d.urgency, want_llm=d.needs_llm >= 0.5)
     result = {"task": task.id, "urgency": d.urgency, "text": text, "compose": tier,
               "decide": d.backend}
     if dry:
@@ -421,7 +428,8 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
         delivered.append("voice")
     store.mark_nagged(task.id)
     store.log_nag(task.id, ",".join(delivered) or "none", d.urgency, text, d.as_json())
-    store.record_run(f"nag about {task.title}", "nag", bool(delivered),
+    store.record_run(f"{'offer on' if tier == 'offer' else 'nag about'} {task.title}",
+                     "offer" if tier == "offer" else "nag", bool(delivered),
                      [f"{d.backend} decided {d.urgency}", f"said: {text[:120]}"],
                      task_id=task.id, target=",".join(delivered) or "nobody")
     result["delivered"] = delivered

@@ -69,6 +69,15 @@ splitting or handing off instead of repeating himself. "What do you know about m
 that…", the ledger's **Memory** tab (× to forget), `hearthsmith memory [add|forget]`, and
 `hearthsmith_memory_list / _add / _forget` over MCP.
 
+When nagging isn't working he **offers to do something about it**. A task nagged 4 times
+(`nag.stuck_after`) with no steps and no movement gets an offer instead of a fifth nag: "'do the
+taxes' has sat through 5 nags… want me to split it into steps? Or hand it to an agent, or leave it
+be." He recommends a hand-off when the task belongs to a project with a folder, a split
+otherwise, and does neither until you answer — "split it", "hand it off", "yes" (his pick) or
+"no" — to him or from the ledger, where a stuck task is marked and its ⋯ menu has *Leave it be*.
+"No" stops the offers and the nags for that task until its date moves or it gets a step. An
+unanswered offer can come back after three days.
+
 Twice a day he tells you where things stand. The **morning brief** (from 08:30): what landed
 overnight — answers, agents that finished or didn't — what's overdue, what's due today, what's
 stuck, which panes are waiting on a yes. The **evening wrap** (from 18:30): what you struck off,

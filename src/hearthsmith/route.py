@@ -275,6 +275,11 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
             return Reply("desktop", f"Opened {exe} in {Path(cwd).name or cwd}.")
         return Reply("desktop", "No terminal app on this machine that I know of.")
 
+    # an answer to his "want me to split it or hand it off?" — no decider needed
+    from hearthsmith import offer
+    if said := offer.answer(cfg, store, text):
+        return Reply("offer", said)
+
     state = {"user_said": text,
              "open_tasks": {t.id: t.title for t in tasks[:40]},
              "panes": {p.id: f"{p.label} (cwd {p.cwd}, {p.activity})" for p in (snap.panes if snap else [])},

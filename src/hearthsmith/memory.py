@@ -241,8 +241,9 @@ def noticed(store: Store, now: datetime | None = None) -> list[str]:
             spans = " and ".join(f"{w * 3:02d}:00–{w * 3 + 3:02d}:00" for w in sorted(top))
             out.append(f"Gets things done mostly around {spans} ({len(done)} tasks in 30 days); "
                        "a nag lands better then.")
+    from hearthsmith.offer import declined
     for t in store.list("open"):
-        if t.nag_count >= 4 and not store.children(t.id):
+        if t.nag_count >= 4 and not store.children(t.id) and not declined(store, t):
             out.append(f"'{t.title}' has been nagged {t.nag_count} times without moving — suggest "
                        "splitting it into steps or handing it to an agent instead of nagging again.")
     return out[:6]

@@ -101,6 +101,8 @@ class NagCfg:
     min_gap_minutes: int = 45
     quiet_hours: tuple[int, int] = (23, 8)  # local; no nags from 23:00 to 08:00
     snooze_default_minutes: int = 120
+    # nagged this many times with no steps and no movement: offer to split / hand off instead
+    stuck_after: int = 4
     markdown_file: Path | None = Path.home() / "tasks.md"
     channels: list[str] = field(default_factory=lambda: ["notify", "hyperpanes"])
 
