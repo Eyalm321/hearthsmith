@@ -149,6 +149,9 @@ class EarCfg:
     barge_in_ms: int = 300            # sustained speech needed to cut him off
     barge_in_strict: float = 1.8      # × the normal speech threshold while he's talking
     hotkey: str = "<Super>j"          # install.sh binds `hearthsmith-ear listen` to it
+    # spoken turns confirm simple actions in a fixed line ("Noted: X, Friday 17:00.") instead of
+    # a composed one, and say "on it" before slow work; answers to questions are still composed
+    quick_replies: bool = True
 
 
 @dataclass

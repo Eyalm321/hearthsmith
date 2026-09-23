@@ -331,15 +331,24 @@ class Listener:
     def _route(self, said: str):
         from hearthsmith.route import Reply, route
         try:
-            return route(said, self.full)
+            return route(said, self.full, quick=self.cfg.quick_replies, ack=self._ack)
         except Exception as e:
             log.exception("route failed")
             return Reply("error", f"Couldn't do that: {type(e).__name__}.")
+
+    def _ack(self, line: str) -> None:
+        """A short "on it" while the real work runs; the answer waits for it to finish."""
+        self._show(line, "forge")
+        self._acking = threading.Thread(target=self.voice.speak, args=(line,), daemon=True)
+        self._acking.start()
 
     def _speak(self, text: str, mic: Mic) -> list[bytes] | None:
         """Speak, watching the mic: loud, sustained speech over him cuts him off and becomes
         the start of your next turn (returned). A headset leaks little, but the bar is higher
         than for a normal turn so his own voice and a cough don't count."""
+        if (a := getattr(self, "_acking", None)) is not None:
+            a.join(timeout=10)
+            self._acking = None
         done = threading.Event()
 
         def say():

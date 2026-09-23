@@ -78,3 +78,17 @@ def test_follow_up_it(tmp_path):
     assert _reschedule("move it to the other folder", s, s.list(), t.id) is None
     old = time.time() + convo.WINDOW_S + 5
     assert convo.last_task(s, now=old) is None
+
+
+def test_quick_confirmation_skips_the_model(tmp_path, monkeypatch):
+    from hearthsmith import config
+    from hearthsmith import route as route_mod
+    cfg = config.Config()
+    cfg.db_path, cfg.nag.markdown_file = tmp_path / "t.db", None
+    cfg.hyperpanes.control_file = tmp_path / "none.json"
+    monkeypatch.setattr(route_mod, "_jev", lambda *a, **k: {
+        "intent": {"choice": "add", "probabilities": {"add": 0.9}},
+        "due": {"choice": "0"}, "urgent": {"noul": 0.0}})
+    monkeypatch.setattr(route_mod, "_say", lambda *a, **k: (_ for _ in ()).throw(AssertionError("model called")))
+    r = route_mod.route("remind me to oil the anvil tomorrow at 9", cfg, quick=True)
+    assert r.intent == "add" and r.text.startswith("Noted: oil the anvil, tomorrow 09:00")

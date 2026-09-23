@@ -257,12 +257,17 @@ def _label(brief: str) -> str:
     return " ".join(words)[:40] or "hearthsmith task"
 
 
-def route(text: str, cfg: config.Config | None = None) -> Reply:
-    """Act on what was said, and log the exchange so the next thing said can follow on."""
+def route(text: str, cfg: config.Config | None = None, *, quick: bool = False,
+          ack=None) -> Reply:
+    """Act on what was said, and log the exchange so the next thing said can follow on.
+
+    For speech: `quick` confirms simple actions in a fixed line instead of a composed one (a
+    second model call, seconds on the Mac, for "Noted"), and `ack(line)` is called with a short
+    "on it" before anything that takes a while, so there's no dead air."""
     from hearthsmith import convo
     cfg = cfg or config.load()
     store = Store(cfg.db_path)
-    r = _route(text, cfg, store)
+    r = _route(text, cfg, store, quick, ack or (lambda _line: None))
     try:
         convo.log(store, text, r.text, r.intent, r.task_id)
     except Exception:  # a lost log line must not lose the reply
@@ -295,7 +300,8 @@ def _reschedule(text: str, store: Store, tasks: list, last: str | None) -> Reply
     return Reply("snooze", f"'{t.title}' — now due {when.describe(due)}.", t.id)
 
 
-def _route(text: str, cfg: config.Config, store: Store) -> Reply:
+def _route(text: str, cfg: config.Config, store: Store, quick: bool = False,
+           ack=lambda _line: None) -> Reply:
     from hearthsmith import convo
     history = convo.recent(store)
     last = convo.last_task(store)
@@ -367,6 +373,7 @@ def _route(text: str, cfg: config.Config, store: Store) -> Reply:
     if BRIEF_ASK.search(text) and not when.REMINDER.match(text):
         from hearthsmith import brief
         started = time.time()
+        ack("Let me look.")
         b = brief.make(cfg, store, "weekly" if re.search(r"\bweek", text, re.IGNORECASE) else None)
         if b["quiet"]:
             return Reply("brief", "Quiet day. Nothing done, nothing due, nothing waiting.", raw=raw)
@@ -398,6 +405,7 @@ def _route(text: str, cfg: config.Config, store: Store) -> Reply:
             goal = (f"Open the page that actually answers this and stop there. A list of search "
                     f"results is not an answer — click through to the real page first. "
                     f"Question: {text}" if looking_up else text)
+            ack("Looking." if looking_up else "On it.")
             j = jev.run(goal, cfg=cfg)
             answered = (answer_mod.from_page(cfg, text, j.page_text, j.url)
                         if looking_up else None)
@@ -421,6 +429,7 @@ def _route(text: str, cfg: config.Config, store: Store) -> Reply:
 
     if intent in ("browse", "desktop"):
         from hearthsmith.desktop.agent import run
+        ack("On it.")
         started = int(time.time())
         b = run(text, cfg)
         store.record_run(text, "desktop", b.ok, b.steps, note=b.note, target=b.window,
@@ -436,6 +445,7 @@ def _route(text: str, cfg: config.Config, store: Store) -> Reply:
         if t is None or not _same_thing(what, t.title):
             t = next((x for x in tasks if _same_thing(what, x.title)), None)
         if t is not None:
+            ack("Finding it an agent.")
             h = hand(cfg, store, t, hp)
             return Reply("pane", h.text, t.id, h.pane_id, raw)
 
@@ -451,6 +461,7 @@ def _route(text: str, cfg: config.Config, store: Store) -> Reply:
             title, due, repeat = when.parse_full(what)
             t = store.add(title, due=due, repeat=repeat)
         if t is not None:
+            ack("Cutting it up.")
             made = split(cfg, store, t)
             if not made:
                 return Reply("add", f"Couldn't break '{t.title}' down — no model gave me usable steps. It's on "
@@ -467,6 +478,9 @@ def _route(text: str, cfg: config.Config, store: Store) -> Reply:
         project = a["project"]["choice"] if "project" in a and a["project"].get("confidence", 0) > 0.5 else None
         t = store.add(title, due=due, project=project, repeat=repeat)
         said = when.describe(due) + (f"; it repeats {when.describe_rule(repeat)}" if repeat else "")
+        if quick:
+            return Reply(intent, f"Noted: {title}" + ("" if due is None else f", {said}") + ".",
+                         t.id, raw={**raw, "due": due})
         line = _say(cfg.compose, f"The user just asked you to remember: '{title}' (due: {said}).",
                     "Confirm in one short line, in character, and say exactly when it's due.") \
             or f"Noted: {title} ({said})."
@@ -518,6 +532,7 @@ def _route(text: str, cfg: config.Config, store: Store) -> Reply:
             return Reply(intent, f"Opened a {'claude pane' if with_claude else 'terminal'} "
                          f"in {where}.", None, pane_id, raw)
         from hearthsmith.handoff import start_agent
+        ack("Opening a pane.")
         pane_id, briefed, steps = start_agent(hp, cwd, _label(brief), brief)
         if not pane_id:
             intent = "pane"          # couldn't open one; fall through to an existing pane
