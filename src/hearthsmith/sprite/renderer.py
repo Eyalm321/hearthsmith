@@ -526,6 +526,11 @@ class Sprite(Gtk.Window):
             self.text, self.instant = random.choice(self.DONE_LINES), True
         elif kind == "added":
             self.text, self.instant = f"Noted: {task.title[:60]}", True
+        elif kind == "again":
+            from hearthsmith.when import describe
+            self.text, self.instant = f"Back on the anvil {describe(task.due)}.", True
+        elif kind == "splitting":
+            self.text, self.instant = f"Cutting '{task.title[:40]}' into pieces…", True
         else:
             return
         self.text_until = time.time() + 5

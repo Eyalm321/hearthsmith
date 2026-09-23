@@ -110,6 +110,11 @@ BRIEF_ASK = re.compile(r"\b(?:brief\s+me|(?:morning|daily|evening)\s+(?:brief|br
                        r"|what(?:'?s|\s+is|\s+does)\s+(?:on\s+)?my\s+(?:day|plate|agenda)"
                        r"|how\s+(?:did|was)\s+(?:my|the)\s+day|what\s+did\s+i\s+(?:get\s+)?done\s+today)",
                        re.IGNORECASE)
+# "break down the launch", "split X into steps" — the task, cut into what you'd actually do
+SPLIT_ASK = re.compile(r"^\s*(?:(?:can|could)\s+you\s+)?(?:please\s+)?"
+                       r"(?:break\s+(?:down|up)|split(?:\s+up)?|plan\s+out|chunk)\s+(?:the\s+task\s+)?"
+                       r"|\s+into\s+(?:smaller\s+)?(?:steps|pieces|chunks|subtasks)\s*[.?!]*$",
+                       re.IGNORECASE)
 WANTS_AGENT = re.compile(r"\b(?:claude|agent)\b", re.IGNORECASE)
 TERMINALS = ("ptyxis", "gnome-terminal", "kgx", "foot", "konsole", "alacritty", "kitty", "xterm")
 
@@ -206,6 +211,17 @@ def _where(cfg: config.Config, brief: str, workdir: str, snap, hp) -> tuple[str,
     return "spawn", None
 
 
+STOP = {"the", "a", "an", "to", "of", "for", "and", "my", "on", "in", "with", "into", "steps", "it"}
+
+
+def _same_thing(said: str, title: str) -> bool:
+    """Most of the task's words are in what was said (stems, so 'launching' finds 'launch')."""
+    def stems(x: str) -> set[str]:
+        return {w[:5] for w in re.findall(r"[a-z0-9]+", x.lower()) if w not in STOP}
+    have, want = stems(said), stems(title)
+    return bool(want) and len(have & want) * 2 >= len(want)
+
+
 def _label(brief: str) -> str:
     words = [w for w in re.split(r"\W+", brief) if len(w) > 3][:4]
     return " ".join(words)[:40] or "hearthsmith task"
@@ -256,8 +272,8 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
         intent = a["intent"]["choice"]
         conf = a["intent"].get("probabilities", {}).get(intent, 0)
     except Exception as e:  # noqa: BLE001 — no decider → store it, never lose the input
-        title, due = when.parse(text)
-        t = store.add(title, due=due)
+        title, due, repeat = when.parse_full(text)
+        t = store.add(title, due=due, repeat=repeat)
         return Reply("add", f"Noted '{title}'" + (f", {when.describe(due)}" if due else "")
                      + f". (decider down: {type(e).__name__})", t.id)
 
@@ -327,15 +343,34 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
             return Reply(intent, f"Done — {b.window}." if b.window else "Done.", raw={**raw, "steps": b.steps})
         return Reply(intent, f"Couldn't finish ({b.note}). Was in {b.window or 'nowhere'}.",
                      raw={**raw, "steps": b.steps})
+    if SPLIT_ASK.search(text) and not when.REMINDER.match(text):
+        from hearthsmith.steps import split
+        what = SPLIT_ASK.sub("", text).strip(" .?!")
+        # the decider will name *some* task with confidence; it has to share words with what
+        # was said ("break down launching the website" once landed on "research filament prices")
+        t = store.get(a["task"]["choice"]) if "task" in a else None
+        if t is not None and not _same_thing(what, t.title):
+            t = None
+        if t is None and what:
+            title, due, repeat = when.parse_full(what)
+            t = store.add(title, due=due, repeat=repeat)
+        if t is not None:
+            made = split(cfg, store, t)
+            if not made:
+                return Reply("add", f"Couldn't break '{t.title}' down — no model gave me usable steps. It's on "
+                             "the ledger whole.", t.id, raw=raw)
+            return Reply("add", f"'{t.title}' in {len(made)} steps. First: {made[0].title}.",
+                         t.id, raw={**raw, "steps": [s.title for s in made]})
+
     if intent == "add":
         # A date he actually said beats the decider's bucket; the bucket is for "soonish".
-        title, due = when.parse(text)
+        title, due, repeat = when.parse_full(text)
         if due is None:
             due_i = int(a["due"]["choice"])
             due = int(time.time() + DUE_SECS[due_i]) if DUE_SECS[due_i] else None
         project = a["project"]["choice"] if "project" in a and a["project"].get("confidence", 0) > 0.5 else None
-        t = store.add(title, due=due, project=project)
-        said = when.describe(due)
+        t = store.add(title, due=due, project=project, repeat=repeat)
+        said = when.describe(due) + (f"; it repeats {when.describe_rule(repeat)}" if repeat else "")
         line = _say(cfg.compose, f"The user just asked you to remember: '{title}' (due: {said}).",
                     "Confirm in one short line, in character, and say exactly when it's due.") \
             or f"Noted: {title} ({said})."

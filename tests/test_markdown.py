@@ -16,6 +16,6 @@ def test_markdown_import(tmp_path):
 
 
 def test_parse_line_takes_a_time():
-    title, due, project, tags = markdown.parse_line("quench @due(2030-01-02T18:30) +forge #hot #fast")
+    title, due, project, tags, _ = markdown.parse_line("quench @due(2030-01-02T18:30) +forge #hot #fast")
     assert (title, project, tags) == ("quench", "forge", "hot,fast")
     assert due and __import__("datetime").datetime.fromtimestamp(due).hour == 18

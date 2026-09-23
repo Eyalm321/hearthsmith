@@ -38,6 +38,16 @@ as *call the vet*, due Fri 17:00, and he says the time back. Dates are read loca
 (`src/hearthsmith/when.py`, no model); a day with no time is due by 18:00 that day. Only when you
 name no time at all does the decider guess one. The ledger's add box reads the same words.
 
+Tasks can **repeat** — "water the plants every monday", "standup every weekday at 9:30",
+"daily vitamins at 9pm", "pay rent monthly", or `@every(mon,thu)` / `@every(2 weeks)` in tasks.md
+and the ledger. Ticking one off, however it's ticked (ledger, CLI, MCP, "that's done"), puts the
+next occurrence on the ledger; done three days late, the next one is still ahead of you rather
+than a backlog of three. And tasks can have **steps**: ledger → *Add step…*, `hearthsmith add
+--parent <id>`, or let the compose model cut it up — "break down the site launch", ledger →
+*Split into steps*, `hearthsmith split <id>`. A task with open steps is nagged about by its next
+step ("write the copy (step of 'the site launch')"), carrying the task's due date; finishing the
+task finishes its steps.
+
 Twice a day he tells you where things stand. The **morning brief** (from 08:30): what landed
 overnight — answers, agents that finished or didn't — what's overdue, what's due today, what's
 stuck, which panes are waiting on a yes. The **evening wrap** (from 18:30): what you struck off,
@@ -79,11 +89,11 @@ Same `Noul` / `Score` / `Choice` questions in every backend — swapping is a co
 claude mcp add hearthsmith -- $(pwd)/.venv/bin/hearthsmith-mcp
 ```
 
-Tools: `hearthsmith_tasks_list / _add / _done / _block / _snooze`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
+Tools: `hearthsmith_tasks_list / _add / _done / _block / _snooze / _split`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
 
 ## tasks.md
 
-Zero-dep importer. `- [ ] title @due(2026-09-20) +project #tag`. One-way: file → store; tick the box
+Zero-dep importer. `- [ ] title @due(2026-09-20) @every(mon) +project #tag`. One-way: file → store; tick the box
 to mark done. hearthsmith never writes the file.
 
 ## hyperpanes

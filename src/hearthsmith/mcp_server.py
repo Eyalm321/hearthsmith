@@ -37,10 +37,29 @@ def hearthsmith_tasks_list(state: str = "open", project: str | None = None) -> s
 
 @mcp.tool()
 def hearthsmith_tasks_add(title: str, due: str | None = None, project: str | None = None,
-                    tags: str = "", notes: str = "") -> str:
-    """Add a task. due is ISO date/datetime (local). project is a hyperpanes project id or name."""
-    return json.dumps(store().add(title, due=_due(due), project=project, tags=tags,
-                                  notes=notes).as_dict())
+                    tags: str = "", notes: str = "", repeat: str | None = None,
+                    parent_id: str | None = None) -> str:
+    """Add a task. due is ISO date/datetime (local; a bare date = 18:00 that day). project is a
+    hyperpanes project id or name. repeat: "day", "weekday", "mon,thu", "2 weeks", "month" —
+    marking it done creates the next occurrence. parent_id makes it a step of that task."""
+    from hearthsmith.when import next_due, rule_of
+    rule = rule_of(repeat) if repeat else ""
+    if repeat and not rule:
+        return json.dumps({"error": f"can't read repeat {repeat!r}"})
+    d = _due(due) if due else (next_due(rule, None) if rule else None)
+    return json.dumps(store().add(title, due=d, project=project, tags=tags, notes=notes,
+                                  repeat=rule, parent_id=parent_id).as_dict())
+
+
+@mcp.tool()
+def hearthsmith_tasks_split(task_id: str) -> str:
+    """Break a task into 3-7 steps (the compose model proposes them; they're added as its
+    steps). The nags then name the next open step instead of the whole task."""
+    from hearthsmith.steps import split
+    t = store().get(task_id)
+    if not t:
+        return json.dumps({"error": "no such task", "task_id": task_id})
+    return json.dumps([s.as_dict() for s in split(config.load(), store(), t)], indent=1)
 
 
 @mcp.tool()

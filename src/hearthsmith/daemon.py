@@ -24,7 +24,8 @@ log = logging.getLogger("hearthsmith")
 def build_state(store: Store, hp: Hyperpanes, cfg: config.Config) -> tuple[str, list[Task]]:
     """T0: the dense paragraph every backend reads. No model."""
     markdown.sync(cfg.nag.markdown_file, store)
-    tasks = [t for t in store.list("open") if not t.snoozed]
+    from hearthsmith.steps import actionable
+    tasks = actionable(store, [t for t in store.list("open") if not t.snoozed])
     now = time.time()
     lines = [f"Local time {datetime.now():%A %H:%M}."]
     snap = hp.snapshot()
@@ -370,7 +371,9 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
                 NotifySink().send(text, d.urgency, task)
             return {"delegated": task.id, "job": job}
 
-    text, tier = compose(cfg.compose, state, task.title, d.urgency, want_llm=d.needs_llm >= 0.5)
+    # a step is named with its parent ("… (step of 'the launch')"), as the decider saw it
+    said = next((t.title for t in tasks if t.id == task.id), task.title)
+    text, tier = compose(cfg.compose, state, said, d.urgency, want_llm=d.needs_llm >= 0.5)
     result = {"task": task.id, "urgency": d.urgency, "text": text, "compose": tier,
               "decide": d.backend}
     if dry:

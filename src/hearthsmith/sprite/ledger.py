@@ -3,7 +3,9 @@ straight from SQLite, so a task an agent adds over MCP shows up here within a co
 
 Add box takes the tasks.md syntax (`title @due(2026-09-25T18:00) +project #tag`) or plain
 words ("call the vet friday 5pm", see when.py). Tick = done,
-click a row = its notes and what he did about it, ⋯ = edit / snooze / block / delete.
+click a row = its notes and what he did about it, ⋯ = edit / add step / split into steps /
+snooze / block / delete. Steps sit under their task with a count; `@every(mon)` or "every monday"
+makes a task repeat, and ticking it off puts the next one on the ledger.
 
 Lives in the sprite process (system python, GTK3): right click him → Ledger, or middle click.
 `python3 -m hearthsmith.sprite.ledger` opens it alone.
@@ -48,6 +50,7 @@ CSS = b"""
 #ledger .meta { color: #8c857a; font-size: 16px; }
 #ledger .overdue { color: #ff5e4a; }
 #ledger .done { color: #6d675f; text-decoration-line: line-through; }
+#ledger .step-entry { margin: 0 12px 6px 58px; }
 #ledger .detail { color: #b8b0a2; font-size: 16px; padding: 2px 14px 8px 44px; }
 #ledger .empty { color: #6d675f; padding: 30px; }
 #ledger button.flat { background: transparent; border: none; box-shadow: none; padding: 0 6px;
@@ -89,6 +92,8 @@ def as_line(t: Task) -> str:
                    else f"@due({d:%Y-%m-%dT%H:%M})")
     if t.project:
         out.append(f"+{t.project}")
+    if t.repeat:
+        out.append(f"@every({t.repeat})")
     out += [f"#{g}" for g in t.tags.split(",") if g]
     return " ".join(out)
 
@@ -107,6 +112,7 @@ class Ledger(Gtk.Window):
         self.tab = "open"
         self.expanded: set[str] = set()
         self.editing: str | None = None
+        self.adding_step: str | None = None      # parent id with an open "add step" box
         self._stamp: tuple = ()
 
         self.set_title("hearthsmith — ledger")
@@ -183,7 +189,8 @@ class Ledger(Gtk.Window):
         return (tuple(r), n[0], self.tab, frozenset(self.expanded))
 
     def _poll(self) -> bool:
-        if self.get_visible() and self.editing is None and self._fingerprint() != self._stamp:
+        if (self.get_visible() and self.editing is None and self.adding_step is None
+                and self._fingerprint() != self._stamp):
             self.refresh()
         return True
 
@@ -195,6 +202,9 @@ class Ledger(Gtk.Window):
         n_over = sum(t.overdue for t in self.store.list("open"))
         self.count.set_text(f"{n_open} open" + (f" · {n_over} overdue" if n_over else ""))
         tasks = self.store.list(self.tab)
+        if self.tab == "open":
+            ids = {t.id for t in tasks}
+            tasks = [t for t in tasks if t.parent_id not in ids]
         if self.tab == "done":
             tasks.sort(key=lambda t: -t.updated_at)
             tasks = tasks[:50]
@@ -214,6 +224,11 @@ class Ledger(Gtk.Window):
                 self.list.add(self._plain_row(lab))
             last = sec
             self.list.add(self._task_row(t))
+            if self.tab == "open":
+                for c in self.store.children(t.id):
+                    self.list.add(self._task_row(c, depth=1))
+                if self.adding_step == t.id:
+                    self.list.add(self._plain_row(self._step_entry(t)))
         self.list.show_all()
 
     # -- rows ----------------------------------------------------------------------------------
@@ -224,12 +239,21 @@ class Ledger(Gtk.Window):
         r.add(child)
         return r
 
-    def _task_row(self, t: Task) -> Gtk.ListBoxRow:
+    def _step_entry(self, parent: Task) -> Gtk.Entry:
+        e = Gtk.Entry()
+        e.set_placeholder_text("Step…  Enter adds another · Esc when done")
+        e.get_style_context().add_class("step-entry")
+        e.connect("activate", self._on_step_add, parent)
+        e.connect("key-press-event", self._on_step_key)
+        GLib.idle_add(e.grab_focus)
+        return e
+
+    def _task_row(self, t: Task, depth: int = 0) -> Gtk.ListBoxRow:
         row = Gtk.ListBoxRow()
         row.task_id = t.id
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         line = Gtk.Box(spacing=8)
-        line.set_margin_start(14)
+        line.set_margin_start(14 + 30 * depth)
         line.set_margin_end(8)
         line.set_margin_top(4)
         line.set_margin_bottom(4)
@@ -284,11 +308,15 @@ class Ledger(Gtk.Window):
         if t.due:
             w = esc(_when(t.due))
             bits.append(f"<span foreground='#ff5e4a'>overdue · {w}</span>" if t.overdue else w)
-        if t.project:
+        if t.project and not t.parent_id:      # a step's project is its task's; said once, above
             bits.append(f"+{esc(t.project)}")
         bits += [f"#{esc(g)}" for g in t.tags.split(",") if g]
         if t.snoozed:
             bits.append(f"zz till {datetime.fromtimestamp(t.snoozed_until):%H:%M}")
+        if t.repeat:
+            bits.append(f"↻ {esc(when.describe_rule(t.repeat))}")
+        if kids := self.store.children(t.id):
+            bits.append(f"{sum(k.state == 'done' for k in kids)}/{len(kids)} steps")
         if t.nag_count:
             bits.append(f"nagged {t.nag_count}×")
         if t.source != "hearthsmith":
@@ -317,6 +345,9 @@ class Ledger(Gtk.Window):
             m.append(it)
 
         item("Edit", lambda: setattr(self, "editing", t.id))
+        if t.state == "open" and not t.parent_id:
+            item("Add step…", lambda: setattr(self, "adding_step", t.id))
+            item("Split into steps", lambda: self._split(t))
         if t.state == "open":
             item("Snooze 1 hour", lambda: self.store.snooze(t.id, 60))
             item("Snooze till tomorrow 9:00", lambda: self.store.snooze(t.id, _tomorrow_9()))
@@ -337,15 +368,16 @@ class Ledger(Gtk.Window):
         if not text:
             return
         try:
-            title, due, project, tags = parse_line(text)
+            title, due, project, tags, repeat = parse_line(text)
         except ValueError:
-            e.get_style_context().add_class("overdue")  # bad @due(...) date
+            e.get_style_context().add_class("overdue")  # bad @due(...) / @every(...)
             return
         e.get_style_context().remove_class("overdue")
-        if due is None:
-            title, due = when.parse(title)     # "call the vet friday 5pm" works here too
+        if due is None and not repeat:
+            # "call the vet friday 5pm", "water plants every monday" work here too
+            title, due, repeat = when.parse_full(title)
         if title:
-            t = self.store.add(title, due=due, project=project, tags=tags)
+            t = self.store.add(title, due=due, project=project, tags=tags, repeat=repeat)
             self.on_event("added", t)
         e.set_text("")
         if self.tab != "open":
@@ -354,11 +386,39 @@ class Ledger(Gtk.Window):
 
     def _on_check(self, chk: Gtk.CheckButton, t: Task) -> None:
         state = "done" if chk.get_active() else "open"
-        self.store.set_state(t.id, state)
+        t = self.store.set_state(t.id, state) or t
         if state == "done":
-            self.on_event("done", t)
+            nxt = self.store.get(t.next_id) if t.next_id else None
+            self.on_event("done", nxt or t)
+            if nxt:
+                self.on_event("again", nxt)
         # let the tick show before the row leaves the list
         GLib.timeout_add(350, lambda: (self.refresh(), False)[1])
+
+    def _on_step_add(self, e: Gtk.Entry, parent: Task) -> None:
+        if title := e.get_text().strip():
+            self.store.add(title, parent_id=parent.id)
+        self.refresh()          # re-draws the box under the new step, focused, for the next one
+
+    def _on_step_key(self, _e, ev) -> bool:
+        if ev.keyval == Gdk.KEY_Escape:
+            self.adding_step = None
+            self.refresh()
+            return True
+        return False
+
+    def _split(self, t: Task) -> None:
+        """The compose model lives in the venv, not this GTK python: ask the CLI. The poll picks
+        the steps up when they land."""
+        import subprocess
+        import threading
+
+        from hearthsmith.sprite.renderer import _bin
+        self.expanded.discard(t.id)
+        self.on_event("splitting", t)
+        threading.Thread(target=lambda: subprocess.run([_bin("hearthsmith"), "split", t.id],
+                                                       capture_output=True, timeout=120, check=False),
+                         daemon=True).start()
 
     def _on_row(self, _l, row) -> None:
         if tid := getattr(row, "task_id", None):
@@ -367,11 +427,11 @@ class Ledger(Gtk.Window):
 
     def _on_edit_save(self, e: Gtk.Entry, t: Task) -> None:
         try:
-            title, due, project, tags = parse_line(e.get_text().strip())
+            title, due, project, tags, repeat = parse_line(e.get_text().strip())
         except ValueError:
             return
         if title:
-            self.store.edit(t.id, title=title, due=due, project=project, tags=tags)
+            self.store.edit(t.id, title=title, due=due, project=project, tags=tags, repeat=repeat)
         self.editing = None
         self.refresh()
 

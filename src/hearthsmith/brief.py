@@ -60,7 +60,7 @@ def facts(store: Store, kind: str, now: datetime | None = None) -> dict:
                       if within(t, now, tomorrow)],
         "open_count": len(open_),
         "blocked": [t.title for t in store.list("blocked")],
-        "done": [t.title for t in store.list("done") if t.updated_at >= since],
+        "done": _done_since(store, since),
         "agents_finished": [r["goal"][:100] for r in runs if r["body"] in AGENT_BODIES and r["ok"]],
         "agents_failed": [r["goal"][:100] for r in runs if r["body"] in AGENT_BODIES and not r["ok"]],
         "waiting_on_you": [f"'{s['label']}' wants to: {s['text'][:100]}" for s in store.suggestions()
@@ -74,6 +74,14 @@ def facts(store: Store, kind: str, now: datetime | None = None) -> dict:
         out["due_this_week"] = len([t for t in open_ if within(t, tomorrow, week)])
         out["someday"] = len([t for t in open_ if t.due is None])
     return out
+
+
+def _done_since(store: Store, since: int) -> list[str]:
+    """Finished tasks, a step only when its task isn't also on the list — finishing the launch
+    finishes its steps, and "you struck off 'deploy' and 'launch'" counts the same work twice."""
+    done = [t for t in store.list("done") if t.updated_at >= since]
+    ids = {t.id for t in done}
+    return [t.title for t in done if t.parent_id not in ids]
 
 
 def quiet(f: dict) -> bool:

@@ -23,8 +23,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   nag_count   INTEGER NOT NULL DEFAULT 0,
   last_nag_at INTEGER,
   created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
+  updated_at  INTEGER NOT NULL,
+  repeat      TEXT NOT NULL DEFAULT '',       -- when.py rule: 1d 2w 1m weekday mon,thu
+  parent_id   TEXT,                           -- a step of another task
+  next_id     TEXT                            -- the occurrence spawned when this one was done
 );
+CREATE INDEX IF NOT EXISTS tasks_parent ON tasks(parent_id);
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_source ON tasks(source, source_id) WHERE source_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS nags (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,6 +98,9 @@ class Task:
     last_nag_at: int | None = None
     created_at: int = 0
     updated_at: int = 0
+    repeat: str = ""
+    parent_id: str | None = None
+    next_id: str | None = None
 
     @property
     def overdue(self) -> bool:
@@ -113,21 +120,31 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path, isolation_level=None)
         self.db.row_factory = sqlite3.Row
+        # columns added after the table first shipped; CREATE IF NOT EXISTS won't add them
+        have = {r["name"] for r in self.db.execute("PRAGMA table_info(tasks)")}
+        if have:
+            for col, ddl in (("repeat", "TEXT NOT NULL DEFAULT ''"), ("parent_id", "TEXT"),
+                             ("next_id", "TEXT")):
+                if col not in have:
+                    self.db.execute(f"ALTER TABLE tasks ADD COLUMN {col} {ddl}")
         self.db.executescript(SCHEMA)
 
     # -- tasks -----------------------------------------------------------------------------
 
     def add(self, title: str, *, due: int | None = None, project: str | None = None,
             source: str = "hearthsmith", source_id: str | None = None, tags: str = "",
-            notes: str = "") -> Task:
+            notes: str = "", repeat: str = "", parent_id: str | None = None) -> Task:
         now = int(time.time())
+        if parent_id and (parent := self.get(parent_id)):
+            parent_id, project = parent.id, project or parent.project   # a step lives where its task does
         t = Task(id=uuid.uuid4().hex[:12], title=title, due=due, project=project, source=source,
-                 source_id=source_id, tags=tags, notes=notes, created_at=now, updated_at=now)
+                 source_id=source_id, tags=tags, notes=notes, created_at=now, updated_at=now,
+                 repeat=repeat, parent_id=parent_id)
         self.db.execute(
             "INSERT INTO tasks (id,title,state,due,project,source,source_id,tags,notes,"
-            "created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "created_at,updated_at,repeat,parent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (t.id, t.title, t.state, t.due, t.project, t.source, t.source_id, t.tags, t.notes,
-             t.created_at, t.updated_at))
+             t.created_at, t.updated_at, t.repeat, t.parent_id))
         return t
 
     def upsert_external(self, source: str, source_id: str, title: str, **kw) -> Task:
@@ -141,7 +158,9 @@ class Store:
                                        row["id"]))
         return self.get(row["id"])
 
-    def get(self, task_id: str) -> Task | None:
+    def get(self, task_id: str | None) -> Task | None:
+        if not task_id:
+            return None
         row = self.db.execute("SELECT * FROM tasks WHERE id=? OR id LIKE ?",
                               (task_id, task_id + "%")).fetchone()
         return Task(**dict(row)) if row else None
@@ -159,13 +178,40 @@ class Store:
         return [Task(**dict(r)) for r in self.db.execute(q, args)]
 
     def set_state(self, task_id: str, state: str) -> Task | None:
+        """Every way a task gets finished comes through here — ledger, CLI, MCP, "that's done" —
+        so this is where a repeat rolls over and a finished task takes its open steps with it."""
         self.db.execute("UPDATE tasks SET state=?, updated_at=? WHERE id=?",
                         (state, int(time.time()), task_id))
-        return self.get(task_id)
+        t = self.get(task_id)
+        if t and state == "done":
+            for c in self.children(t.id, "open"):
+                self.set_state(c.id, "done")
+            if t.repeat and not (t.next_id and self.get(t.next_id)):
+                self._roll(t)
+                t = self.get(task_id)
+        return t
+
+    def _roll(self, t: Task) -> Task:
+        """The next occurrence of a repeating task: same title, project, tags and steps (fresh,
+        open), due at the rule's next date. Done→reopen→done again won't make a second one."""
+        from hearthsmith.when import next_due
+        nxt = self.add(t.title, due=next_due(t.repeat, t.due), project=t.project, tags=t.tags,
+                       repeat=t.repeat, parent_id=t.parent_id)
+        for c in self.children(t.id):
+            self.add(c.title, project=c.project, tags=c.tags, parent_id=nxt.id)
+        self.db.execute("UPDATE tasks SET next_id=? WHERE id=?", (nxt.id, t.id))
+        return nxt
+
+    def children(self, task_id: str, state: str | None = None) -> list[Task]:
+        q, args = "SELECT * FROM tasks WHERE parent_id=?", [task_id]
+        if state:
+            q += " AND state=?"; args.append(state)
+        return [Task(**dict(r)) for r in self.db.execute(q + " ORDER BY created_at, rowid", args)]
 
     def edit(self, task_id: str, **fields) -> Task | None:
         """Change what the task says (title, due, project, tags, notes); nag state is left alone."""
-        cols = {k: v for k, v in fields.items() if k in ("title", "due", "project", "tags", "notes")}
+        cols = {k: v for k, v in fields.items()
+                if k in ("title", "due", "project", "tags", "notes", "repeat", "parent_id")}
         if cols:
             sets = ", ".join(f"{k}=?" for k in cols)  # column names come from the whitelist above
             self.db.execute(f"UPDATE tasks SET {sets}, updated_at=? WHERE id=?",
@@ -173,6 +219,9 @@ class Store:
         return self.get(task_id)
 
     def delete(self, task_id: str) -> None:
+        """Its steps go with it."""
+        for c in self.children(task_id):
+            self.delete(c.id)
         self.db.execute("DELETE FROM tasks WHERE id=?", (task_id,))
 
     def snooze(self, task_id: str, minutes: int) -> Task | None:

@@ -8,6 +8,10 @@ Understands today / tonight / tomorrow, weekdays (this/next), "in 3 hours", "in 
 and times ("5pm", "17:30", "at 5", "noon", "morning" / "afternoon" / "evening"). A day with no
 time means that day at 18:00: due by the end of it, and still due — not overdue — all day.
 What it matched is cut out of the title, along with "remind me to" and its relatives.
+
+Repeats too ("every monday at 9", "daily", "weekdays", "every 2 weeks", "monthly"): `parse_full`
+returns the rule, `next_due` walks it forward when an occurrence is struck off. Rules are short
+strings — `1d` `2w` `1m` `1y` `weekday` `mon,thu` — and the same ones `@every(...)` takes.
 """
 
 from __future__ import annotations
@@ -59,6 +63,94 @@ def from_iso(s: str) -> int:
     return int(d.timestamp())
 
 
+# -- repeats ---------------------------------------------------------------------------------
+
+_WDS = rf"{_WD}s?|(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)"
+_WD_LIST = rf"(?:{_WDS})(?:\s*(?:,|and|&|\+)\s*(?:{_WDS}))*"
+RULE = re.compile(r"^(?:\d+[dwmy]|weekday|(?:mon|tue|wed|thu|fri|sat|sun)(?:,(?:mon|tue|wed|thu|fri|sat|sun))*)$")
+UNITS = {"day": "d", "night": "d", "week": "w", "fortnight": "w", "month": "m", "year": "y"}
+
+
+def _find_repeat(s: str) -> tuple[str, tuple[int, int]] | None:
+    """The first repeat phrase in `s`: (rule, span)."""
+    if m := re.search(r"\b(?:every|each)\s+(?:(other)\s+|(\d+)\s+)?(day|night|week|fortnight|month|year)s?\b",
+                      s, re.IGNORECASE):
+        n = 2 if m[1] else int(m[2] or 1)
+        unit = m[3].lower()
+        return f"{n * (2 if unit == 'fortnight' else 1)}{UNITS[unit]}", m.span()
+    if m := re.search(r"\b(?:every|each|on)\s+(?:week|work)\s*days?\b|\bweekdays\b", s, re.IGNORECASE):
+        return "weekday", m.span()
+    if m := re.search(rf"\b(?:every|each)\s+({_WD_LIST})(?![a-z])", s, re.IGNORECASE) \
+            or re.search(rf"\b(?:on\s+)?((?:{_WD})s(?:\s*(?:,|and|&)\s*(?:{_WD})s)*)\b", s, re.IGNORECASE):
+        days = sorted({_weekday(w) for w in re.findall(r"[a-z]+", m[1].lower())
+                       if w not in ("and",)}, key=int)
+        return ",".join(WEEKDAYS[d][:3] for d in days), m.span()
+    if m := re.search(r"\b(daily|nightly|weekly|fortnightly|biweekly|monthly|yearly|annually)\b",
+                      s, re.IGNORECASE):
+        return {"daily": "1d", "nightly": "1d", "weekly": "1w", "fortnightly": "2w",
+                "biweekly": "2w", "monthly": "1m", "yearly": "1y", "annually": "1y"}[m[1].lower()], m.span()
+    # "every morning" / "every evening": a daily repeat; the part of the day is left for the clock
+    if m := re.search(rf"\b(?:every|each)\s+(?=(?:{_PART})\b)", s, re.IGNORECASE):
+        return "1d", m.span()
+    return None
+
+
+def rule_of(text: str) -> str | None:
+    """`@every(...)`'s argument, or any spoken repeat, as a rule; None when it isn't one."""
+    t = text.strip().lower()
+    if RULE.match(t):
+        return t
+    found = _find_repeat(t if t.startswith(("every", "each")) else f"every {t}")
+    return found[0] if found else None
+
+
+def _add_months(d: datetime, n: int, day: int) -> datetime:
+    y, m = divmod(d.month - 1 + n, 12)
+    y, m = d.year + y, m + 1
+    last = ((datetime(y + (m == 12), m % 12 + 1, 1)) - timedelta(days=1)).day
+    return d.replace(year=y, month=m, day=min(day, last))
+
+
+def next_due(rule: str, prev: int | None, now: datetime | None = None,
+             clock: tuple[int, int] | None = None) -> int:
+    """The next occurrence after both the previous one and now — done three days late, the
+    next one is still ahead of you, not a backlog of three."""
+    now = now or datetime.now()
+    if prev is not None:
+        p = datetime.fromtimestamp(prev)
+        clock = (p.hour, p.minute)
+    h, mi = clock or (DAY_END, 0)
+    base = max(datetime.fromtimestamp(prev), now) if prev is not None else now
+    if rule == "weekday" or not rule[0].isdigit():
+        days = set(range(5)) if rule == "weekday" else {_weekday(w) for w in rule.split(",")}
+        d = base.replace(hour=h, minute=mi, second=0, microsecond=0)
+        for _ in range(15):
+            if d > base and d.weekday() in days:
+                return int(d.timestamp())
+            d += timedelta(days=1)
+        raise ValueError(rule)
+    n, unit = int(rule[:-1]), rule[-1]
+    anchor = (datetime.fromtimestamp(prev) if prev is not None
+              else now.replace(hour=h, minute=mi, second=0, microsecond=0))
+    if prev is None and anchor > now:
+        return int(anchor.timestamp())          # first occurrence: later today still counts
+    d, k = anchor, 0
+    while d <= base:
+        k += 1
+        d = (anchor + timedelta(days=n * k * (7 if unit == "w" else 1)) if unit in "dw"
+             else _add_months(anchor, n * k * (12 if unit == "y" else 1), anchor.day))
+    return int(d.timestamp())
+
+
+def describe_rule(rule: str) -> str:
+    if rule == "weekday":
+        return "weekdays"
+    if not rule[0].isdigit():
+        return "every " + ", ".join(w.capitalize() for w in rule.split(","))
+    n, unit = int(rule[:-1]), {"d": "day", "w": "week", "m": "month", "y": "year"}[rule[-1]]
+    return f"every {unit}" if n == 1 else f"every {n} {unit}s"
+
+
 def _weekday(name: str) -> int:
     return next(i for i, w in enumerate(WEEKDAYS) if w.startswith(name[:3].lower()))
 
@@ -78,12 +170,24 @@ def _clock(h: str, m: str | None, ampm: str | None) -> tuple[int, int] | None:
 
 def parse(text: str, now: datetime | None = None) -> tuple[str, int | None]:
     """(title, due epoch) — due None when the text names no time at all."""
+    title, due, _ = parse_full(text, now)
+    return title, due
+
+
+def parse_full(text: str, now: datetime | None = None) -> tuple[str, int | None, str]:
+    """(title, due epoch, repeat rule or "")."""
     now = now or datetime.now()
     s = text
+    repeat = ""
+    cut_repeat: list[tuple[int, int]] = []
+    if found := _find_repeat(s):
+        repeat, (a, b) = found
+        cut_repeat.append((a, b))
+        s = s[:a] + " " * (b - a) + s[b:]    # blanked, not removed: spans below stay aligned
     day: datetime | None = None          # date part, midnight
     clock: tuple[int, int] | None = None
     delta: timedelta | None = None
-    cut: list[tuple[int, int]] = []
+    cut: list[tuple[int, int]] = list(cut_repeat)
 
     def take(rx: str) -> re.Match | None:
         m = re.search(rx, s, re.IGNORECASE)
@@ -164,16 +268,18 @@ def parse(text: str, now: datetime | None = None) -> tuple[str, int | None]:
             clock = clock or (PARTS[m[1].lower()], 0)
 
     title = _title(text, cut)
+    if repeat and delta is None and day is None:
+        return title, next_due(repeat, None, now, clock), repeat
     if delta is not None:
-        return title, int((now + delta).timestamp())
+        return title, int((now + delta).timestamp()), repeat
     if day is None and clock is None:
-        return title, None
+        return title, None, repeat
     if day is None:
         day = today
         if clock and (clock[0], clock[1]) <= (now.hour, now.minute):
             day += timedelta(days=1)         # "at 9am" said at noon is tomorrow's 9am
     h, mi = clock or (DAY_END, 0)
-    return title, int(day.replace(hour=h, minute=mi).timestamp())
+    return title, int(day.replace(hour=h, minute=mi).timestamp()), repeat
 
 
 def _date(d: int, mon: str, year: str | None, today: datetime) -> datetime | None:

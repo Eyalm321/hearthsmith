@@ -19,19 +19,23 @@ def _fmt(t) -> str:
         h = (t.due - time.time()) / 3600
         due = f"  overdue {-h:.0f}h" if h < 0 else f"  due {datetime.fromtimestamp(t.due):%m-%d %H:%M}"
     flags = "".join(f for f, on in (("z", t.snoozed), ("!", t.overdue)) if on)
+    if t.repeat:
+        from hearthsmith.when import describe_rule
+        flags += f" ↻ {describe_rule(t.repeat)}"
     return f"{t.id}  {t.state:<9} {t.title}{due}  {('[' + t.project + ']') if t.project else ''} {flags}"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="hearthsmith")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    a = sub.add_parser("add"); a.add_argument("title"); a.add_argument("--due"); a.add_argument("--project"); a.add_argument("--tags", default="")
+    a = sub.add_parser("add"); a.add_argument("title"); a.add_argument("--due"); a.add_argument("--project"); a.add_argument("--tags", default=""); a.add_argument("--every", help="repeat: day, weekday, mon,thu, 2 weeks, month…"); a.add_argument("--parent", help="make it a step of this task id")
     ls = sub.add_parser("ls"); ls.add_argument("--all", action="store_true"); ls.add_argument("--project")
     for name in ("done", "block"):
         p = sub.add_parser(name); p.add_argument("task_id")
     sn = sub.add_parser("snooze"); sn.add_argument("task_id"); sn.add_argument("--minutes", type=int, default=120)
     sub.add_parser("state", help="print the T0 state paragraph the decider sees")
     sub.add_parser("nags")
+    spl = sub.add_parser("split", help="break a task into steps (compose model)"); spl.add_argument("task_id")
     bf = sub.add_parser("brief", help="where things stand: morning brief / evening wrap"); bf.add_argument("kind", nargs="?", choices=["morning", "evening"]); bf.add_argument("--dry", action="store_true", help="print only; don't count it as today's"); bf.add_argument("--deliver", action="store_true", help="on the sprite + voice, like the scheduled one"); bf.add_argument("--json", action="store_true")
     sub.add_parser("suggestions", help="what the Claude panes are offering to do next")
     rr = sub.add_parser("runs", help="what he did, and the steps he took"); rr.add_argument("run_id", nargs="?"); rr.add_argument("-n", type=int, default=12); rr.add_argument("--task")
@@ -48,12 +52,22 @@ def main() -> None:
     cfg = config.load()
     store = Store(cfg.db_path)
     if args.cmd == "add":
-        from hearthsmith.when import from_iso
-        due = from_iso(args.due) if args.due else None
-        print(_fmt(store.add(args.title, due=due, project=args.project, tags=args.tags)))
+        from hearthsmith.when import from_iso, next_due, rule_of
+        repeat = rule_of(args.every) if args.every else ""
+        if args.every and not repeat:
+            raise SystemExit(f"can't read --every {args.every!r}")
+        due = from_iso(args.due) if args.due else (next_due(repeat, None) if repeat else None)
+        print(_fmt(store.add(args.title, due=due, project=args.project, tags=args.tags,
+                             repeat=repeat, parent_id=args.parent)))
     elif args.cmd == "ls":
-        for t in store.list(None if args.all else "open", args.project):
+        ts = store.list(None if args.all else "open", args.project)
+        ids = {t.id for t in ts}
+        for t in ts:
+            if t.parent_id in ids:
+                continue
             print(_fmt(t))
+            for c in store.children(t.id, None if args.all else "open"):
+                print("   └ " + _fmt(c))
     elif args.cmd in ("done", "block"):
         t = store.get(args.task_id)
         print(_fmt(store.set_state(t.id, args.cmd if args.cmd == "done" else "blocked")) if t else "no such task")
@@ -78,6 +92,13 @@ def main() -> None:
             if b["text"] and not args.deliver and not args.dry:
                 from hearthsmith.voice import Voice
                 Voice(cfg.voice).speak(b["text"])
+    elif args.cmd == "split":
+        from hearthsmith.steps import split
+        t = store.get(args.task_id)
+        if not t:
+            raise SystemExit("no such task")
+        made = split(cfg, store, t)
+        print("\n".join(_fmt(s) for s in made) if made else "no steps (no model gave a usable list)")
     elif args.cmd == "state":
         hp = Hyperpanes(cfg.hyperpanes.control_file, cfg.hyperpanes.tail_lines)
         print(build_state(store, hp, cfg)[0])
