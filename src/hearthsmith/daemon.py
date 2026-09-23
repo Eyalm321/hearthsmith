@@ -304,6 +304,19 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
             store.log_nag(None, "suggestion", "soon", text, "{}")
         return {"suggestion": sg["text"], "pane": sg["pane_id"], "text": text}
 
+    # once a day each: where things stand, at the first heartbeat you're there for. Muted or
+    # quiet hours hold it (not skip it) — the next heartbeat inside the window still owes it.
+    if not force and not in_quiet_hours(cfg.nag) \
+            and int(store.kv_get("muted_until", "0") or 0) <= time.time():
+        from hearthsmith import brief
+        if kind := brief.due_now(cfg.brief, store, idle=brief.idle_ms()):
+            if dry:
+                b = brief.make(cfg, store, kind)
+                return {"brief": kind, "text": b["text"], "quiet": b["quiet"]}
+            b = brief.deliver(cfg, store, kind)
+            if not b["quiet"]:
+                return {"brief": kind, "text": b["text"], "delivered": b["delivered"]}
+
     state, tasks = build_state(store, hp, cfg)
     last = store.last_nag_at()
 

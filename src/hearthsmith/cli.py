@@ -32,6 +32,7 @@ def main() -> None:
     sn = sub.add_parser("snooze"); sn.add_argument("task_id"); sn.add_argument("--minutes", type=int, default=120)
     sub.add_parser("state", help="print the T0 state paragraph the decider sees")
     sub.add_parser("nags")
+    bf = sub.add_parser("brief", help="where things stand: morning brief / evening wrap"); bf.add_argument("kind", nargs="?", choices=["morning", "evening"]); bf.add_argument("--dry", action="store_true", help="print only; don't count it as today's"); bf.add_argument("--deliver", action="store_true", help="on the sprite + voice, like the scheduled one"); bf.add_argument("--json", action="store_true")
     sub.add_parser("suggestions", help="what the Claude panes are offering to do next")
     rr = sub.add_parser("runs", help="what he did, and the steps he took"); rr.add_argument("run_id", nargs="?"); rr.add_argument("-n", type=int, default=12); rr.add_argument("--task")
     mu = sub.add_parser("mute", help="stop all nagging for a while"); mu.add_argument("minutes", type=int, nargs="?", default=60)
@@ -59,6 +60,24 @@ def main() -> None:
     elif args.cmd == "snooze":
         t = store.get(args.task_id)
         print(_fmt(store.snooze(t.id, args.minutes)) if t else "no such task")
+    elif args.cmd == "brief":
+        from hearthsmith import brief
+        if args.deliver:
+            b = brief.deliver(cfg, store, args.kind)
+        else:
+            started = time.time()
+            b = brief.make(cfg, store, args.kind)
+            if not args.dry:
+                brief.mark(store, b["kind"])
+                if not b["quiet"]:
+                    brief.record(store, b, ["terminal"], started)
+        if args.json:
+            print(json.dumps({k: v for k, v in b.items() if k != "facts"}))
+        else:
+            print(b["text"] or f"({b['kind']}: nothing worth saying)")
+            if b["text"] and not args.deliver and not args.dry:
+                from hearthsmith.voice import Voice
+                Voice(cfg.voice).speak(b["text"])
     elif args.cmd == "state":
         hp = Hyperpanes(cfg.hyperpanes.control_file, cfg.hyperpanes.tail_lines)
         print(build_state(store, hp, cfg)[0])

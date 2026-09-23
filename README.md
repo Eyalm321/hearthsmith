@@ -38,6 +38,16 @@ as *call the vet*, due Fri 17:00, and he says the time back. Dates are read loca
 (`src/hearthsmith/when.py`, no model); a day with no time is due by 18:00 that day. Only when you
 name no time at all does the decider guess one. The ledger's add box reads the same words.
 
+Twice a day he tells you where things stand. The **morning brief** (from 08:30): what landed
+overnight — answers, agents that finished or didn't — what's overdue, what's due today, what's
+stuck, which panes are waiting on a yes. The **evening wrap** (from 18:30): what you struck off,
+what's still open, what's due tomorrow; an evening with nothing to say is skipped. Each comes
+once a day, on the sprite and in his voice, and waits until you've touched the keyboard or mouse
+in the last two minutes (GNOME's idle monitor) so it greets you rather than an empty room. The
+facts come from the store with no model; the compose model only phrases them, a template when
+it's down. On demand: "brief me" / "what's on my plate", **Brief me** in his menu,
+`hearthsmith brief [morning|evening]`, or `hearthsmith_brief` over MCP. Times in `brief:` config.
+
 Ask him a question and he answers it rather than reporting that a page was opened. One page
 holds it ("what does the P2S cost") → he opens the page and reads it, a couple of seconds, and
 says so plainly when the page doesn't actually contain it. It needs comparing sources ("what do
@@ -69,7 +79,7 @@ Same `Noul` / `Score` / `Choice` questions in every backend — swapping is a co
 claude mcp add hearthsmith -- $(pwd)/.venv/bin/hearthsmith-mcp
 ```
 
-Tools: `hearthsmith_tasks_list / _add / _done / _block / _snooze`, `hearthsmith_nags_recent`.
+Tools: `hearthsmith_tasks_list / _add / _done / _block / _snooze`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
 
 ## tasks.md
 

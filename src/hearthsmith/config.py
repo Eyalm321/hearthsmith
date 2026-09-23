@@ -106,6 +106,18 @@ class NagCfg:
 
 
 @dataclass
+class BriefCfg:
+    """Morning brief + evening wrap (brief.py). Local times, HH:MM."""
+    enabled: bool = True
+    morning: str = "08:30"
+    morning_until: int = 12       # not at your desk by noon → no morning brief that day
+    evening: str = "18:30"        # up to quiet hours; after that it waits for tomorrow's
+    # hold the brief until you've touched keyboard/mouse within this many seconds
+    wait_for_you: bool = True
+    present_within_s: int = 120
+
+
+@dataclass
 class VoiceCfg:
     """How he sounds. Zero-shot clone from one reference clip, so the voice IS the clip: swap
     `ref` (and its transcript `ref_text`) and he speaks like someone else.
@@ -150,6 +162,7 @@ class Config:
     desktop: DesktopCfg = field(default_factory=DesktopCfg)
     browser: BrowserCfg = field(default_factory=BrowserCfg)
     nag: NagCfg = field(default_factory=NagCfg)
+    brief: BriefCfg = field(default_factory=BriefCfg)
     voice: VoiceCfg = field(default_factory=VoiceCfg)
     db_path: Path = STATE_DIR / "hearthsmith.db"
     sprite_path: Path = STATE_DIR / "sprite.json"

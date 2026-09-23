@@ -104,6 +104,12 @@ NATIVE = re.compile(r"\b(?:native|ptyxis|gnome[- ]terminal|(?:linux|system|os)\s
                     r"|(?:not|outside(?:\s+of)?|without|instead\s+of)\s+(?:in\s+)?hyperpanes"
                     r"|(?:real|regular|normal|actual|proper|standalone|separate)\s+(?:linux\s+)?"
                     r"(?:terminal|shell|window))\b", re.IGNORECASE)
+# "brief me", "what's my day look like", "how did today go" — the ledger read back, not a nag
+BRIEF_ASK = re.compile(r"\b(?:brief\s+me|(?:morning|daily|evening)\s+(?:brief|briefing|wrap|recap|summary)"
+                       r"|wrap\s+(?:up\s+)?(?:the|my)\s+day|recap\s+(?:the|my)\s+day"
+                       r"|what(?:'?s|\s+is|\s+does)\s+(?:on\s+)?my\s+(?:day|plate|agenda)"
+                       r"|how\s+(?:did|was)\s+(?:my|the)\s+day|what\s+did\s+i\s+(?:get\s+)?done\s+today)",
+                       re.IGNORECASE)
 WANTS_AGENT = re.compile(r"\b(?:claude|agent)\b", re.IGNORECASE)
 TERMINALS = ("ptyxis", "gnome-terminal", "kgx", "foot", "konsole", "alacritty", "kitty", "xterm")
 
@@ -256,6 +262,14 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
                      + f". (decider down: {type(e).__name__})", t.id)
 
     raw = {"answers": a}
+    if BRIEF_ASK.search(text) and not when.REMINDER.match(text):
+        from hearthsmith import brief
+        started = time.time()
+        b = brief.make(cfg, store)
+        if b["quiet"]:
+            return Reply("brief", "Quiet day. Nothing done, nothing due, nothing waiting.", raw=raw)
+        brief.record(store, b, ["reply"], started)
+        return Reply("brief", b["text"], raw={**raw, "facts": b["facts"]})
     if when.REMINDER.match(text):
         intent = "add"            # "remind me to research X" is for later, not for now
     # A question about the world is not a question for him: if it wants a fact that lives on a

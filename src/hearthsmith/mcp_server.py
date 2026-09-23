@@ -73,6 +73,16 @@ def hearthsmith_tasks_snooze(task_id: str, minutes: int = 120) -> str:
 
 
 @mcp.tool()
+def hearthsmith_brief(kind: str | None = None) -> str:
+    """Where things stand, from the ledger: kind "morning" (overdue, due today, what landed
+    overnight, what's stuck) or "evening" (done today, still open, due tomorrow). Default picks
+    by time of day. Returns the spoken text plus the facts it was built from."""
+    from hearthsmith import brief
+    b = brief.make(config.load(), store(), kind)
+    return json.dumps({"text": b["text"], "facts": b["facts"]}, indent=1)
+
+
+@mcp.tool()
 def hearthsmith_nags_recent(n: int = 5) -> str:
     """What the blacksmith said recently, with the decision that drove it."""
     return json.dumps(store().recent_nags(n), indent=1)
