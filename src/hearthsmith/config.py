@@ -114,6 +114,9 @@ class BriefCfg:
     morning: str = "08:30"
     morning_until: int = 12       # not at your desk by noon → no morning brief that day
     evening: str = "18:30"        # up to quiet hours; after that it waits for tomorrow's
+    # the weekly review (review.py): this day, from this time; "" turns it off
+    weekly_day: str = "fri"
+    weekly: str = "16:00"
     # hold the brief until you've touched keyboard/mouse within this many seconds
     wait_for_you: bool = True
     present_within_s: int = 120

@@ -475,6 +475,7 @@ class Sprite(Gtk.Window):
         item("Ledger…", self.open_ledger)
         item("Talk to him…", self.open_prompt)
         item("Brief me", lambda: self._forge("brief", "--deliver"))
+        item("Weekly review", lambda: self._forge("brief", "weekly", "--deliver"))
         item("Nag me now", lambda: self._systemctl("start", "hearthsmithd-now.service"))
         mute = Gtk.Menu()
         for lab, mins in (("1 hour", 60), ("4 hours", 240), ("Rest of today", 24 * 60), ("Unmute", 0)):

@@ -51,9 +51,9 @@ WEEKENDS = re.compile(rf"{_WHO}\s+(?:on\s+)?(?:the\s+)?weekends?|weekends?\s+(?:
 MUTE = re.compile(rf"{_WHO}\s+about\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:tasks?|stuff|things))?[.!]*$",
                   re.IGNORECASE)
 FOCUS = re.compile(r"(?:focus(?:ing)?\s+(?:is\s+)?on|prioriti[sz]e|priority\s+is)\s+(?:the\s+|my\s+)?(.+?)"
-                   r"(?:\s+(today|this\s+week|until\s+\w+|for\s+now))?[.!]*$"
+                   r"(?:\s+(today|this\s+week|next\s+week|until\s+\w+|for\s+now))?[.!]*$"
                    r"|(?:the\s+|my\s+)?(.+?)\s+(?:is\s+what\s+matters|matters\s+most|is\s+the\s+priority|comes\s+first)"
-                   r"(?:\s+(today|this\s+week|until\s+\w+|for\s+now))?[.!]*$", re.IGNORECASE)
+                   r"(?:\s+(today|this\s+week|next\s+week|until\s+\w+|for\s+now))?[.!]*$", re.IGNORECASE)
 # "remember that …", "note: …" — the fact without the asking
 LEAD = re.compile(r"^\s*(?:hey\s+|oi\s+)?(?:smith[,\s]+)?(?:please\s+)?(?:remember|note|keep\s+in\s+mind|"
                   r"know|fyi|for\s+the\s+record)(?:\s+that)?[:,\s]+", re.IGNORECASE)
@@ -83,6 +83,8 @@ def _until(word: str | None, now: datetime) -> int | None:
     w = word.lower()
     if w == "today":
         return int((today + timedelta(days=1)).timestamp())
+    if w.startswith("next"):      # said at a Friday review: from now through next Sunday
+        return int((today + timedelta(days=14 - today.weekday())).timestamp())
     if w.startswith("this"):
         return int((today + timedelta(days=7 - today.weekday())).timestamp())    # through Sunday
     from hearthsmith.when import parse
@@ -121,7 +123,10 @@ def confirm(row: dict) -> str:
         return f"I'll leave {r['mute']} alone. It stays on the ledger."
     if "focus" in r:
         until = datetime.fromtimestamp(row["expires_at"]) if row["expires_at"] else None
-        return f"{r['focus']} first" + (f", through {until - timedelta(seconds=1):%A}." if until else ".")
+        last = until - timedelta(seconds=1) if until else None
+        # "through Sunday" is ambiguous once the Sunday meant is next week's
+        fmt = "%A" if last and last - datetime.now() < timedelta(days=6) else "%A %d %b"
+        return f"{r['focus']} first" + (f", through {last:{fmt}}." if last else ".")
     return f"Noted: {row['text']}."
 
 

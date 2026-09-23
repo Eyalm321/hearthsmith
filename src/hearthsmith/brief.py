@@ -145,22 +145,25 @@ def template(f: dict) -> str:
     return " ".join(s)
 
 
-def phrase(cfg: config.ComposeCfg, f: dict) -> tuple[str, str]:
+def phrase(cfg: config.ComposeCfg, f: dict, ask: str | None = None,
+           fallback=None) -> tuple[str, str]:
     """(text, tier). The model gets the facts and may only rephrase them."""
+    msgs = [{"role": "system", "content": cfg.persona}, {"role": "user", "content": ask or _ask(f)}]
+    for tier, fn in (("ornith", _ollama), ("openrouter", _openrouter)):
+        if out := fn(cfg, msgs):
+            return _trim(out), tier
+    return (fallback or template)(f), "template"
+
+
+def _ask(f: dict) -> str:
     what = ("the MORNING BRIEF: start the day — what landed overnight, what's overdue, what's due "
             "today, what's on the calendar, anything stuck or waiting on the user"
             if f["kind"] == "morning" else
             "the EVENING WRAP: close the day — what got done, what's still open today, what's "
             "due tomorrow and tomorrow's first meetings")
-    msgs = [{"role": "system", "content": cfg.persona},
-            {"role": "user", "content":
-                f"Facts (JSON, complete — mention nothing that isn't here):\n{json.dumps(f)}\n\n"
-                f"Give {what}. Three or four short sentences, spoken aloud. Most important first. "
-                "Name tasks by their titles. Skip empty categories. No lists, no markdown."}]
-    for tier, fn in (("ornith", _ollama), ("openrouter", _openrouter)):
-        if out := fn(cfg, msgs):
-            return _trim(out), tier
-    return template(f), "template"
+    return (f"Facts (JSON, complete — mention nothing that isn't here):\n{json.dumps(f)}\n\n"
+            f"Give {what}. Three or four short sentences, spoken aloud. Most important first. "
+            "Name tasks by their titles. Skip empty categories. No lists, no markdown.")
 
 
 def idle_ms() -> int | None:
@@ -185,7 +188,11 @@ def due_now(cfg: config.BriefCfg, store: Store, now: datetime | None = None,
     day = f"{now:%Y-%m-%d}"
     hm = (now.hour, now.minute)
     kind = None
-    if (_hm(cfg.morning) <= hm and now.hour < cfg.morning_until
+    week = f"{now:%G-W%V}"
+    if (cfg.weekly and f"{now:%a}".lower() == cfg.weekly_day[:3].lower()
+            and _hm(cfg.weekly) <= hm and store.kv_get("brief_weekly") != week):
+        kind = "weekly"
+    elif (_hm(cfg.morning) <= hm and now.hour < cfg.morning_until
             and store.kv_get("brief_morning") != day):
         kind = "morning"
     elif _hm(cfg.evening) <= hm and store.kv_get("brief_evening") != day:
@@ -197,11 +204,12 @@ def due_now(cfg: config.BriefCfg, store: Store, now: datetime | None = None,
 
 def mark(store: Store, kind: str, now: datetime | None = None) -> None:
     now = now or datetime.now()
-    store.kv_set(f"brief_{kind}", f"{now:%Y-%m-%d}")
-    store.kv_set("brief_last_at", str(int(now.timestamp())))
+    store.kv_set(f"brief_{kind}", f"{now:%G-W%V}" if kind == "weekly" else f"{now:%Y-%m-%d}")
+    if kind != "weekly":          # the morning brief's "overnight" is since the last daily one
+        store.kv_set("brief_last_at", str(int(now.timestamp())))
 
 
-def _events(cfg: config.Config) -> list | None:
+def _events(cfg: config.Config, days: int = 2) -> list | None:
     """Today and tomorrow from the calendar; None without feeds or when they fail — the brief
     goes out without it rather than not at all."""
     from hearthsmith import calendar
@@ -209,7 +217,7 @@ def _events(cfg: config.Config) -> list | None:
         return None
     now = datetime.now()
     try:
-        return calendar.events(cfg.calendar, now, now.replace(hour=0, minute=0) + timedelta(days=2))
+        return calendar.events(cfg.calendar, now, now.replace(hour=0, minute=0) + timedelta(days=days))
     except Exception:  # noqa: BLE001
         return None
 
@@ -217,6 +225,11 @@ def _events(cfg: config.Config) -> list | None:
 def make(cfg: config.Config, store: Store, kind: str | None = None) -> dict:
     """Gather + phrase one brief. Returns {kind, text, tier, facts, quiet}."""
     kind = kind or kind_for(datetime.now())
+    if kind == "weekly":
+        from hearthsmith import review
+        f = review.facts(store, events=_events(cfg, 8), stuck_after=cfg.nag.stuck_after)
+        text, tier = phrase(cfg.compose, f, review.prompt(f), review.template)
+        return {"kind": kind, "text": text, "tier": tier, "facts": f, "quiet": False}
     f = facts(store, kind, events=_events(cfg))
     if quiet(f):
         return {"kind": kind, "text": "", "tier": "none", "facts": f, "quiet": True}
@@ -227,7 +240,7 @@ def make(cfg: config.Config, store: Store, kind: str | None = None) -> dict:
 def record(store: Store, b: dict, delivered: list[str], started: float) -> None:
     store.log_nag(None, ",".join(delivered) or "none", "ignorable", b["text"],
                   json.dumps({"brief": b["kind"], "tier": b["tier"]}))
-    store.record_run(f"{b['kind']} brief", "brief", bool(delivered),
+    store.record_run("weekly review" if b["kind"] == "weekly" else f"{b['kind']} brief", "brief", bool(delivered),
                      [f"phrased by {b['tier']}", f"said: {b['text'][:200]}"],
                      target=",".join(delivered) or "nobody", started_at=int(started))
 

@@ -99,6 +99,15 @@ facts come from the store with no model; the compose model only phrases them, a 
 it's down. On demand: "brief me" / "what's on my plate", **Brief me** in his menu,
 `hearthsmith brief [morning|evening]`, or `hearthsmith_brief` over MCP. Times in `brief:` config.
 
+Once a week (Friday from 16:00, `brief.weekly_day` / `brief.weekly`) comes the **weekly
+review**: how much you struck off and how much of it late, the busiest day, how the focus went,
+what the agents took and brought back, what's still overdue, what's been carried all week or
+nagged about for nothing (with what to do about it), then next week — what's due and how full the
+calendar is — ending with "what's the focus next week?". Answer "focus on the launch next week"
+and it's set through next Sunday. Same delivery as the daily brief; on demand with "how did my
+week go", **Weekly review** in his menu, `hearthsmith brief weekly`, or `hearthsmith_brief` with
+kind `weekly`.
+
 Ask him a question and he answers it rather than reporting that a page was opened. One page
 holds it ("what does the P2S cost") → he opens the page and reads it, a couple of seconds, and
 says so plainly when the page doesn't actually contain it. It needs comparing sources ("what do

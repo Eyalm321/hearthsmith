@@ -110,7 +110,9 @@ NATIVE = re.compile(r"\b(?:native|ptyxis|gnome[- ]terminal|(?:linux|system|os)\s
 BRIEF_ASK = re.compile(r"\b(?:brief\s+me|(?:morning|daily|evening)\s+(?:brief|briefing|wrap|recap|summary)"
                        r"|wrap\s+(?:up\s+)?(?:the|my)\s+day|recap\s+(?:the|my)\s+day"
                        r"|what(?:'?s|\s+is|\s+does)\s+(?:on\s+)?my\s+(?:day|plate|agenda)"
-                       r"|how\s+(?:did|was)\s+(?:my|the)\s+day|what\s+did\s+i\s+(?:get\s+)?done\s+today)",
+                       r"|how\s+(?:did|was)\s+(?:my|the)\s+day|what\s+did\s+i\s+(?:get\s+)?done\s+today"
+                       r"|(?:weekly|week'?s?)\s+(?:review|recap|wrap|summary)|review\s+(?:the|my)\s+week"
+                       r"|how\s+(?:did|was)\s+(?:my|the|this)\s+week)",
                        re.IGNORECASE)
 # "break down the launch", "split X into steps" — the task, cut into what you'd actually do
 SPLIT_ASK = re.compile(r"^\s*(?:(?:can|could)\s+you\s+)?(?:please\s+)?"
@@ -319,7 +321,7 @@ def route(text: str, cfg: config.Config | None = None) -> Reply:
     if BRIEF_ASK.search(text) and not when.REMINDER.match(text):
         from hearthsmith import brief
         started = time.time()
-        b = brief.make(cfg, store)
+        b = brief.make(cfg, store, "weekly" if re.search(r"\bweek", text, re.IGNORECASE) else None)
         if b["quiet"]:
             return Reply("brief", "Quiet day. Nothing done, nothing due, nothing waiting.", raw=raw)
         brief.record(store, b, ["reply"], started)
