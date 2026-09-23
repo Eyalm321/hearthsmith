@@ -37,7 +37,8 @@ def _hm(s: str) -> tuple[int, int]:
     return int(h), int(m)
 
 
-def facts(store: Store, kind: str, now: datetime | None = None) -> dict:
+def facts(store: Store, kind: str, now: datetime | None = None,
+          events: list | None = None) -> dict:
     """Everything the brief may mention, straight from the store."""
     now = now or datetime.now()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -69,6 +70,14 @@ def facts(store: Store, kind: str, now: datetime | None = None) -> dict:
     from hearthsmith.memory import Memory
     if focus := Memory(store).rules().get("focus"):
         out["focus"] = focus
+    # the day's calendar: what's left of today in the morning, tomorrow in the evening
+    if events:
+        from hearthsmith.calendar import line
+        d = (today if kind == "morning" else tomorrow).date()
+        out["calendar"] = [line(e, now) for e in events
+                           if datetime.fromtimestamp(e.start).date() <= d
+                           < datetime.fromtimestamp(max(e.start, e.end - 1)).date() + timedelta(days=1)
+                           and e.end > now.timestamp()][:8]
     if kind == "evening":
         out["due_tomorrow"] = [t.title for t in open_ if within(t, tomorrow, tomorrow + timedelta(days=1))]
         out["added_today"] = len([t for t in store.list(None) if t.created_at >= today.timestamp()])
@@ -90,8 +99,8 @@ def _done_since(store: Store, since: int) -> list[str]:
 def quiet(f: dict) -> bool:
     """An evening with nothing done and nothing coming isn't worth a speech."""
     return f["kind"] == "evening" and not any(
-        f[k] for k in ("done", "overdue", "due_today", "due_tomorrow", "agents_finished",
-                       "agents_failed", "waiting_on_you"))
+        f.get(k) for k in ("done", "overdue", "due_today", "due_tomorrow", "agents_finished",
+                           "agents_failed", "waiting_on_you", "calendar"))
 
 
 def _list(xs: list[str], n: int = 3) -> str:
@@ -106,6 +115,8 @@ def template(f: dict) -> str:
         s.append("Morning.")
         if f["agents_finished"]:
             s.append(f"Overnight the agents finished {_list(f['agents_finished'], 2)}.")
+        if f.get("calendar"):
+            s.append(f"On the calendar: {_list(f['calendar'], 4)}.")
         if f["overdue"]:
             s.append(f"Overdue: {_list(f['overdue'])}.")
         if f["due_today"]:
@@ -122,6 +133,8 @@ def template(f: dict) -> str:
             s.append(f"Still open: {_list(f['overdue'] + f['due_today'])}.")
         if f["due_tomorrow"]:
             s.append(f"Tomorrow: {_list(f['due_tomorrow'])}.")
+        if f.get("calendar"):
+            s.append(f"Tomorrow's calendar: {_list(f['calendar'], 4)}.")
     if f["agents_failed"]:
         s.append(f"{_list(f['agents_failed'], 1)} didn't finish.")
     if f["blocked"]:
@@ -135,10 +148,10 @@ def template(f: dict) -> str:
 def phrase(cfg: config.ComposeCfg, f: dict) -> tuple[str, str]:
     """(text, tier). The model gets the facts and may only rephrase them."""
     what = ("the MORNING BRIEF: start the day — what landed overnight, what's overdue, what's due "
-            "today, anything stuck or waiting on the user"
+            "today, what's on the calendar, anything stuck or waiting on the user"
             if f["kind"] == "morning" else
             "the EVENING WRAP: close the day — what got done, what's still open today, what's "
-            "due tomorrow")
+            "due tomorrow and tomorrow's first meetings")
     msgs = [{"role": "system", "content": cfg.persona},
             {"role": "user", "content":
                 f"Facts (JSON, complete — mention nothing that isn't here):\n{json.dumps(f)}\n\n"
@@ -188,10 +201,23 @@ def mark(store: Store, kind: str, now: datetime | None = None) -> None:
     store.kv_set("brief_last_at", str(int(now.timestamp())))
 
 
+def _events(cfg: config.Config) -> list | None:
+    """Today and tomorrow from the calendar; None without feeds or when they fail — the brief
+    goes out without it rather than not at all."""
+    from hearthsmith import calendar
+    if not calendar.feeds(cfg.calendar):
+        return None
+    now = datetime.now()
+    try:
+        return calendar.events(cfg.calendar, now, now.replace(hour=0, minute=0) + timedelta(days=2))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def make(cfg: config.Config, store: Store, kind: str | None = None) -> dict:
     """Gather + phrase one brief. Returns {kind, text, tier, facts, quiet}."""
     kind = kind or kind_for(datetime.now())
-    f = facts(store, kind)
+    f = facts(store, kind, events=_events(cfg))
     if quiet(f):
         return {"kind": kind, "text": "", "tier": "none", "facts": f, "quiet": True}
     text, tier = phrase(cfg.compose, f)

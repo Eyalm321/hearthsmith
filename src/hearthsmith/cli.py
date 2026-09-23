@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from hearthsmith import config
 from hearthsmith.adapters.hyperpanes import Hyperpanes
@@ -35,6 +35,7 @@ def main() -> None:
     sn = sub.add_parser("snooze"); sn.add_argument("task_id"); sn.add_argument("--minutes", type=int, default=120)
     sub.add_parser("state", help="print the T0 state paragraph the decider sees")
     sub.add_parser("nags")
+    ca = sub.add_parser("cal", help="what's on your calendar (iCal feeds)"); ca.add_argument("--days", type=int, default=2)
     me = sub.add_parser("memory", help="what he knows about you: list / add \"...\" / forget <id or words>"); me.add_argument("action", nargs="?", default="list", choices=["list", "add", "forget"]); me.add_argument("text", nargs="*")
     hd = sub.add_parser("hand", help="hand a task to a Claude agent; its report comes back to the task"); hd.add_argument("task_id"); hd.add_argument("--back", action="store_true", help="take it back: stop waiting on the agent")
     spl = sub.add_parser("split", help="break a task into steps (compose model)"); spl.add_argument("task_id")
@@ -94,6 +95,14 @@ def main() -> None:
             if b["text"] and not args.deliver and not args.dry:
                 from hearthsmith.voice import Voice
                 Voice(cfg.voice).speak(b["text"])
+    elif args.cmd == "cal":
+        from hearthsmith import calendar
+        if not calendar.feeds(cfg.calendar):
+            raise SystemExit("no calendar: set HEARTHSMITH_CALENDAR=<private iCal URL> in ~/.config/hearthsmith/env")
+        now = datetime.now()
+        for e in calendar.events(cfg.calendar, now.replace(hour=0, minute=0),
+                                 now.replace(hour=0, minute=0) + timedelta(days=args.days)):
+            print(calendar.line(e, now))
     elif args.cmd == "memory":
         from hearthsmith.memory import Memory, confirm, noticed
         mem = Memory(store)

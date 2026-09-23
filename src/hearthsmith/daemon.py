@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from hearthsmith import config
+from hearthsmith import calendar, config
 from hearthsmith.adapters import markdown
 from hearthsmith.adapters.hyperpanes import Hyperpanes
 from hearthsmith.compose import compose
@@ -46,11 +46,37 @@ def build_state(store: Store, hp: Hyperpanes, cfg: config.Config) -> tuple[str, 
             lines.append(f"  - {t.title}{proj}{due}{nag}")
     else:
         lines.append("No open tasks.")
+    lines += calendar.state_lines(_calendar(cfg))
     last = store.last_nag_at()
     lines.append("Last nag: " + (f"{(now - last) / 60:.0f} min ago." if last else "never."))
     if about := mem.paragraph():
         lines.append(about)
     return "\n".join(lines), tasks
+
+
+def _calendar(cfg: config.Config) -> list[calendar.Event]:
+    """The next two days, never raising: a broken feed is no calendar, not a dead heartbeat."""
+    if not calendar.feeds(cfg.calendar):
+        return []
+    try:
+        evs = calendar.upcoming(cfg.calendar)
+        calendar.write_snapshot(evs)
+        return evs
+    except Exception:
+        log.exception("calendar failed")
+        return []
+
+
+def heads_up(cfg: config.Config, store: Store, evs: list[calendar.Event],
+             now: float | None = None) -> calendar.Event | None:
+    """The meeting starting within heads_up_min that he hasn't warned about yet."""
+    now = now or time.time()
+    lead = cfg.calendar.heads_up_min * 60
+    for e in evs:
+        if (not e.all_day and lead and 0 < e.start - now <= lead
+                and not store.kv_get(f"cal_warned:{e.key}")):
+            return e
+    return None
 
 
 def in_quiet_hours(cfg: config.NagCfg, store: Store | None = None,
@@ -308,6 +334,7 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
     and min-gap gates and always say something, even if Jev would have stayed quiet."""
     sprite = SpriteSink(cfg.sprite_path)
     voice = VoiceSink(cfg.voice)
+    evs = _calendar(cfg)          # first: every heartbeat refreshes the ledger's calendar.json
     # an answer you asked for outranks a reminder you didn't
     for found in collect_research(cfg, store, hp):
         text = (f"The agent's back on '{found['question'][:60]}': {found['answer'][:400]} "
@@ -331,6 +358,25 @@ def heartbeat(cfg: config.Config, store: Store, hp: Hyperpanes, dry: bool = Fals
             voice.send(text, "soon", None)
             store.log_nag(None, "suggestion", "soon", text, "{}")
         return {"suggestion": sg["text"], "pane": sg["pane_id"], "text": text}
+
+    # the calendar outranks the ledger: a meeting about to start is worth a word, and one in
+    # progress is no time to be nagged
+    if (not force and not in_quiet_hours(cfg.nag, store)
+            and int(store.kv_get("muted_until", "0") or 0) <= time.time()
+            and (ev := heads_up(cfg, store, evs))):
+        mins = max(1, round((ev.start - time.time()) / 60))
+        text = f"In {mins} minutes: {ev.title}" + (f", {ev.location}" if ev.location else "") + "."
+        if dry:
+            return {"heads_up": ev.title, "text": text}
+        store.kv_set(f"cal_warned:{ev.key}", "1")
+        if not sprite.send(text, "soon", None):
+            NotifySink().send(text, "soon", None)
+        voice.send(text, "soon", None)
+        store.log_nag(None, "calendar", "soon", text, "{}")
+        return {"heads_up": ev.title, "text": text}
+    if not force and cfg.calendar.hold_nags_in_meetings and (cur := calendar.current(evs)):
+        sprite.write("idle")
+        return {"skipped": "in_meeting", "event": cur.title}
 
     # once a day each: where things stand, at the first heartbeat you're there for. Muted or
     # quiet hours hold it (not skip it) — the next heartbeat inside the window still owes it.

@@ -78,6 +78,17 @@ otherwise, and does neither until you answer — "split it", "hand it off", "yes
 "No" stops the offers and the nags for that task until its date moves or it gets a step. An
 unanswered offer can come back after three days.
 
+He reads your **calendar** from its private iCal link — Google's *Secret address in iCal
+format*, Outlook's published ICS link, iCloud's public calendar link, Proton's share link, or a
+local `.ics`. Put it in `~/.config/hearthsmith/env` as `HEARTHSMITH_CALENDAR=<url> [<url>…]` (the
+link is a password to your calendar, so it lives with the other secrets and never in a log).
+Repeating meetings, exceptions and timezones are expanded; feeds are fetched every 15 minutes and
+the last copy is used when a fetch fails. He gives a heads-up 10 minutes before each meeting,
+holds nags while you're in one, knows the next event when deciding what to say, puts today's
+meetings in the morning brief and tomorrow's in the evening wrap, and shows the rest of today at
+the top of the ledger. Ask him "what's on my calendar tomorrow" or "when's my next meeting";
+`hearthsmith cal`, `hearthsmith_calendar` over MCP. Settings under `calendar:`.
+
 Twice a day he tells you where things stand. The **morning brief** (from 08:30): what landed
 overnight — answers, agents that finished or didn't — what's overdue, what's due today, what's
 stuck, which panes are waiting on a yes. The **evening wrap** (from 18:30): what you struck off,
@@ -119,7 +130,7 @@ Same `Noul` / `Score` / `Choice` questions in every backend — swapping is a co
 claude mcp add hearthsmith -- $(pwd)/.venv/bin/hearthsmith-mcp
 ```
 
-Tools: `hearthsmith_tasks_list / _get / _add / _edit / _done / _reopen / _block / _snooze / _delete / _split / _hand`, `hearthsmith_memory_list / _add / _forget`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
+Tools: `hearthsmith_tasks_list / _get / _add / _edit / _done / _reopen / _block / _snooze / _delete / _split / _hand`, `hearthsmith_memory_list / _add / _forget`, `hearthsmith_calendar`, `hearthsmith_brief`, `hearthsmith_nags_recent`.
 
 ## tasks.md
 

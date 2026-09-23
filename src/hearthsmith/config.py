@@ -120,6 +120,16 @@ class BriefCfg:
 
 
 @dataclass
+class CalendarCfg:
+    """iCal feeds (calendar.py). "$NAME" entries are read from the environment — put a secret
+    feed URL in ~/.config/hearthsmith/env as HEARTHSMITH_CALENDAR=<url> [<url>…]."""
+    feeds: list[str] = field(default_factory=lambda: ["$HEARTHSMITH_CALENDAR"])
+    refresh_min: int = 15
+    heads_up_min: int = 10        # 0 = no heads-up before meetings
+    hold_nags_in_meetings: bool = True
+
+
+@dataclass
 class VoiceCfg:
     """How he sounds. Zero-shot clone from one reference clip, so the voice IS the clip: swap
     `ref` (and its transcript `ref_text`) and he speaks like someone else.
@@ -165,6 +175,7 @@ class Config:
     browser: BrowserCfg = field(default_factory=BrowserCfg)
     nag: NagCfg = field(default_factory=NagCfg)
     brief: BriefCfg = field(default_factory=BriefCfg)
+    calendar: CalendarCfg = field(default_factory=CalendarCfg)
     voice: VoiceCfg = field(default_factory=VoiceCfg)
     db_path: Path = STATE_DIR / "hearthsmith.db"
     sprite_path: Path = STATE_DIR / "sprite.json"

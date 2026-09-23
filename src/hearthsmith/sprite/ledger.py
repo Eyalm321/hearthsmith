@@ -192,7 +192,14 @@ class Ledger(Gtk.Window):
         r = self.store.db.execute("SELECT COUNT(*), MAX(updated_at) FROM tasks").fetchone()
         mem = self.store.db.execute("SELECT COUNT(*), MAX(created_at) FROM memory").fetchone()
         n = self.store.db.execute("SELECT MAX(at) FROM runs").fetchone()
-        return (tuple(r), tuple(mem), n[0], self.tab, frozenset(self.expanded))
+        try:
+            from hearthsmith.calendar import SNAPSHOT
+            cal = SNAPSHOT.stat().st_mtime
+        except OSError:
+            cal = 0
+        # the minute too: "now" moves along the calendar without anything else changing
+        return (tuple(r), tuple(mem), n[0], cal, int(time.time() // 60), self.tab,
+                frozenset(self.expanded))
 
     def _poll(self) -> bool:
         if (self.get_visible() and self.editing is None and self.adding_step is None
@@ -230,6 +237,8 @@ class Ledger(Gtk.Window):
                                    "done": "Nothing finished yet."}[self.tab])
             lab.get_style_context().add_class("empty")
             self.list.add(self._plain_row(lab))
+        if self.tab == "open":
+            self._calendar_rows()
         order = {"Overdue": 0, "Today": 1, "Upcoming": 2, "Someday": 3, "": 4}
         tasks.sort(key=lambda t: order[_section(t)])  # stable: keeps the store's due order inside
         last = None
@@ -248,6 +257,32 @@ class Ledger(Gtk.Window):
         self.list.show_all()
 
     # -- rows ----------------------------------------------------------------------------------
+
+    def _calendar_rows(self) -> None:
+        """What's left of today on the calendar, from the snapshot the heartbeat writes — the
+        feeds themselves are fetched in the venv, never from this window."""
+        from hearthsmith.calendar import current, read_snapshot
+        now = time.time()
+        today = datetime.now().date()
+        evs = [e for e in read_snapshot() if e.end > now
+               and datetime.fromtimestamp(e.start).date() <= today][:5]
+        if not evs:
+            return
+        lab = Gtk.Label(label="CALENDAR", xalign=0)
+        lab.get_style_context().add_class("section")
+        self.list.add(self._plain_row(lab))
+        cur = current(evs, now)
+        for e in evs:
+            at = ("all day" if e.all_day else "now" if e is cur
+                  else datetime.fromtimestamp(e.start).strftime("%H:%M"))
+            row = Gtk.Label(xalign=0)
+            esc = GLib.markup_escape_text
+            row.set_markup(f"<span foreground='#ff9a2e'>{esc(at):>7}</span>  {esc(e.title)}"
+                           + (f"  <span foreground='#8c857a'>{esc(e.location[:40])}</span>"
+                              if e.location else ""))
+            row.set_margin_start(14)
+            row.set_ellipsize(Pango.EllipsizeMode.END)
+            self.list.add(self._plain_row(row))
 
     def _memory_rows(self) -> None:
         from hearthsmith.memory import noticed

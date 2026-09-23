@@ -15,6 +15,8 @@ dependencies = [
     "jev-ultrafast @ git+https://github.com/browser-use/jev-ultrafast",
     # his voice: AuK zero-shot clone, served by the HF space (no GPU here big enough)
     "gradio_client>=1.0",
+    "icalendar>=7.3.0",
+    "recurring-ical-events>=3.8.2",
 ]
 
 [project.scripts]

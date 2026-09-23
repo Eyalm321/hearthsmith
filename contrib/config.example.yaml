@@ -38,3 +38,9 @@ voice:
   ref: assets/voice/dwarf.wav      # the clip IS the voice — swap it (and ref_text) and he sounds like someone else
   ref_text: assets/voice/dwarf.txt
   sink: ""                         # PipeWire sink name (`pactl list sinks short`); "" = default output
+calendar:
+  # feed URLs or .ics paths; "$NAME" reads the environment — keep secret links in ~/.config/hearthsmith/env
+  feeds: ["$HEARTHSMITH_CALENDAR"]
+  refresh_min: 15
+  heads_up_min: 10                 # 0 = no heads-up before meetings
+  hold_nags_in_meetings: true

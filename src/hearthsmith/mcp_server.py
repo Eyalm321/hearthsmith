@@ -185,6 +185,24 @@ def hearthsmith_brief(kind: str | None = None) -> str:
 
 
 @mcp.tool()
+def hearthsmith_calendar(days: int = 1) -> str:
+    """The user's calendar from today for `days` days (their iCal feeds): title, start/end
+    (ISO, local), all_day, location. Empty with a note when no feed is configured."""
+    from datetime import datetime, timedelta
+
+    from hearthsmith import calendar
+    cfg = config.load()
+    if not calendar.feeds(cfg.calendar):
+        return json.dumps({"events": [], "note": "no calendar feed configured"})
+    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    evs = calendar.events(cfg.calendar, start, start + timedelta(days=max(1, days)))
+    return json.dumps({"events": [{"title": e.title, "all_day": e.all_day, "location": e.location,
+                                   "start": datetime.fromtimestamp(e.start).isoformat(),
+                                   "end": datetime.fromtimestamp(e.end).isoformat()} for e in evs]},
+                      indent=1)
+
+
+@mcp.tool()
 def hearthsmith_memory_list() -> str:
     """What hearthsmith knows about the user: things they told it (with any rule it obeys —
     quiet hours, muted topics, this week's focus) and habits it noticed from the ledger."""
