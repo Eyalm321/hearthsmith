@@ -47,7 +47,8 @@ def main() -> None:
     cfg = config.load()
     store = Store(cfg.db_path)
     if args.cmd == "add":
-        due = int(datetime.fromisoformat(args.due).timestamp()) if args.due else None
+        from hearthsmith.when import from_iso
+        due = from_iso(args.due) if args.due else None
         print(_fmt(store.add(args.title, due=due, project=args.project, tags=args.tags)))
     elif args.cmd == "ls":
         for t in store.list(None if args.all else "open", args.project):

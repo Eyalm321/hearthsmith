@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime
 from pathlib import Path
 
 from hearthsmith.store import Store
+from hearthsmith.when import from_iso
 
 LINE = re.compile(r"^\s*[-*]\s+\[( |x|X)\]\s+(.*)$")
 DUE = re.compile(r"@due\((\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?)\)")
@@ -22,7 +22,7 @@ def parse_line(body: str) -> tuple[str, int | None, str | None, str]:
     add box takes the same syntax as tasks.md, so there is one way to write a task."""
     due = None
     if d := DUE.search(body):
-        due = int(datetime.fromisoformat(d.group(1)).timestamp())
+        due = from_iso(d.group(1))
     project = p.group(1) if (p := PROJ.search(body)) else None
     tags = ",".join(TAG.findall(body))
     title = TAG.sub("", PROJ.sub("", DUE.sub("", body))).strip()

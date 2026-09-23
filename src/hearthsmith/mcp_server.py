@@ -4,12 +4,12 @@ client. stdio transport; register with e.g. `claude mcp add hearthsmith -- heart
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 from mcp.server.mcpserver import MCPServer
 
 from hearthsmith import config
 from hearthsmith.store import Store
+from hearthsmith.when import from_iso
 
 mcp = MCPServer("hearthsmith", instructions="Task ledger owned by hearthsmith, the nagging blacksmith pet. Prefer "
               "hearthsmith_tasks_list before adding to avoid duplicates.")
@@ -24,7 +24,7 @@ def store() -> Store:
 
 
 def _due(s: str | None) -> int | None:
-    return int(datetime.fromisoformat(s).timestamp()) if s else None
+    return from_iso(s) if s else None
 
 
 @mcp.tool()

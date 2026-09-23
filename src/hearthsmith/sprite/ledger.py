@@ -85,7 +85,8 @@ def as_line(t: Task) -> str:
     out = [t.title]
     if t.due:
         d = datetime.fromtimestamp(t.due)
-        out.append(f"@due({d:%Y-%m-%d})" if (d.hour, d.minute) == (0, 0) else f"@due({d:%Y-%m-%dT%H:%M})")
+        out.append(f"@due({d:%Y-%m-%d})" if (d.hour, d.minute) == (when.DAY_END, 0)
+                   else f"@due({d:%Y-%m-%dT%H:%M})")
     if t.project:
         out.append(f"+{t.project}")
     out += [f"#{g}" for g in t.tags.split(",") if g]

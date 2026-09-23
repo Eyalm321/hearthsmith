@@ -55,3 +55,9 @@ def test_describe():
 def test_reminder(text, is_reminder):
     from hearthsmith.when import REMINDER
     assert bool(REMINDER.match(text)) is is_reminder
+
+
+def test_bare_date_is_due_by_end_of_day():
+    from hearthsmith.when import DAY_END, from_iso
+    assert datetime.fromtimestamp(from_iso("2026-09-25")) == datetime(2026, 9, 25, DAY_END)
+    assert datetime.fromtimestamp(from_iso("2026-09-25T07:15")) == datetime(2026, 9, 25, 7, 15)

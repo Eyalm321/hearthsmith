@@ -50,6 +50,15 @@ TRAIL = re.compile(r"[\s,;:.!?-]*(?:\b(?:on|at|by|in|due|before|for|until|til+|f
                    re.IGNORECASE)
 
 
+def from_iso(s: str) -> int:
+    """`2026-09-25` or `2026-09-25T18:30` → epoch. A bare date is due by DAY_END that day, the
+    same as "on the 25th" said out loud; midnight would make it overdue the whole day."""
+    d = datetime.fromisoformat(s.strip())
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s.strip()):
+        d = d.replace(hour=DAY_END)
+    return int(d.timestamp())
+
+
 def _weekday(name: str) -> int:
     return next(i for i, w in enumerate(WEEKDAYS) if w.startswith(name[:3].lower()))
 
