@@ -163,6 +163,18 @@ class Store:
                         (state, int(time.time()), task_id))
         return self.get(task_id)
 
+    def edit(self, task_id: str, **fields) -> Task | None:
+        """Change what the task says (title, due, project, tags, notes); nag state is left alone."""
+        cols = {k: v for k, v in fields.items() if k in ("title", "due", "project", "tags", "notes")}
+        if cols:
+            sets = ", ".join(f"{k}=?" for k in cols)  # column names come from the whitelist above
+            self.db.execute(f"UPDATE tasks SET {sets}, updated_at=? WHERE id=?",
+                            (*cols.values(), int(time.time()), task_id))
+        return self.get(task_id)
+
+    def delete(self, task_id: str) -> None:
+        self.db.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+
     def snooze(self, task_id: str, minutes: int) -> Task | None:
         until = int(time.time()) + minutes * 60
         self.db.execute("UPDATE tasks SET snoozed_until=?, updated_at=? WHERE id=?",

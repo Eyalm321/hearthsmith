@@ -12,9 +12,21 @@ from pathlib import Path
 from hearthsmith.store import Store
 
 LINE = re.compile(r"^\s*[-*]\s+\[( |x|X)\]\s+(.*)$")
-DUE = re.compile(r"@due\((\d{4}-\d{2}-\d{2})\)")
+DUE = re.compile(r"@due\((\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?)\)")
 PROJ = re.compile(r"\+(\S+)")
 TAG = re.compile(r"#(\S+)")
+
+
+def parse_line(body: str) -> tuple[str, int | None, str | None, str]:
+    """`title @due(2026-09-20[T18:00]) +project #tag` → (title, due, project, tags). The ledger's
+    add box takes the same syntax as tasks.md, so there is one way to write a task."""
+    due = None
+    if d := DUE.search(body):
+        due = int(datetime.fromisoformat(d.group(1)).timestamp())
+    project = p.group(1) if (p := PROJ.search(body)) else None
+    tags = ",".join(TAG.findall(body))
+    title = TAG.sub("", PROJ.sub("", DUE.sub("", body))).strip()
+    return title, due, project, tags
 
 
 def sync(path: Path, store: Store) -> int:
@@ -26,12 +38,7 @@ def sync(path: Path, store: Store) -> int:
         if not m:
             continue
         checked, body = m.group(1) != " ", m.group(2).strip()
-        due = None
-        if d := DUE.search(body):
-            due = int(datetime.fromisoformat(d.group(1)).timestamp())
-        project = PROJ.search(body).group(1) if PROJ.search(body) else None
-        tags = ",".join(TAG.findall(body))
-        title = TAG.sub("", PROJ.sub("", DUE.sub("", body))).strip()
+        title, due, project, tags = parse_line(body)
         sid = hashlib.sha1(title.lower().encode()).hexdigest()[:12]
         t = store.upsert_external("markdown", sid, title, due=due, project=project)
         if tags and t.tags != tags:

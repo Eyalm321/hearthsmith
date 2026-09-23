@@ -83,7 +83,13 @@ Delegation enqueues to `hyperpanes.delegate_queue` (default `hearthsmith`); drai
 An always-on-top, click-through GTK window (`hearthsmith-sprite.service`) that polls
 `sprite.json` (`state ∈ idle | forge | alert | sleep`, `text`, `urgency`) and plays the matching
 frames from a sprite pack sliced out of `assets/sheets/`. Left click talks to him, drag moves him,
-right click is the menu (size, corner, sheet, nag now, hide). Position and size persist in
+middle click opens his ledger, right click is the menu (ledger, size, corner, sheet, nag now, hide).
+
+The **ledger** is the task list as a window, read straight from the store — a task an agent adds
+over MCP appears within a couple of seconds. The add box takes the tasks.md syntax
+(`quench @due(2026-09-25T18:00) +forge #hot`); tick = done, click a row = its notes and the runs
+he made for it, `⋯` = edit / snooze / block / delete. Open / Blocked / Done tabs, Ctrl+N to add,
+Esc to close. `python3 -m hearthsmith.sprite.ledger` opens it without the avatar. Position and size persist in
 `~/.config/hearthsmith/avatar.yaml`. If the frame clock stalls he remaps himself, then restarts.
 
 While either body works, the avatar narrates it — "clicking One way", "typing Where from? =

@@ -2,8 +2,8 @@
 plays the matching state. XWayland path (GDK_BACKEND=x11) because Mutter has no layer-shell; a
 GNOME Shell extension can replace this later — the state file contract stays.
 
-Interaction: left click = talk to him, left hold+drag = move, right click = menu (size, corner,
-sheet, nag now, hide). Everything outside his body is click-through. Position/size persist in
+Interaction: left click = talk to him, left hold+drag = move, middle click = the ledger (his
+task list), right click = menu (ledger, size, corner, sheet, nag now, hide). Everything outside his body is click-through. Position/size persist in
 ~/.config/hearthsmith/avatar.yaml (scale, x/y or corner, sheet) and hot-reload.
 
 Launch as the user service (hearthsmith-sprite start), never from an agent pane (cgroup cap + oomd).
@@ -387,6 +387,8 @@ class Sprite(Gtk.Window):
             self._press = (int(ev.x_root), int(ev.y_root), ev.time)
             self._grab = (int(ev.x_root) - wx, int(ev.y_root) - wy)  # pointer offset in window
             self._dragging = False
+        elif ev.button == 2:
+            self.open_ledger()
         elif ev.button == 3:
             self.open_menu(ev)
         return True
@@ -470,6 +472,7 @@ class Sprite(Gtk.Window):
         item("Appearance", None, sheets)
 
         m.append(Gtk.SeparatorMenuItem())
+        item("Ledger…", self.open_ledger)
         item("Talk to him…", self.open_prompt)
         item("Nag me now", lambda: self._systemctl("start", "hearthsmithd-now.service"))
         mute = Gtk.Menu()
@@ -499,6 +502,33 @@ class Sprite(Gtk.Window):
     def _systemctl(self, verb: str, unit: str) -> None:
         import subprocess
         subprocess.Popen(["systemctl", "--user", verb, unit])
+
+    # -- the ledger ----------------------------------------------------------------------------
+
+    DONE_LINES = ("One off the anvil.", "Good steel, that.", "Struck and quenched.",
+                  "Ledger's lighter.", "Aye, that'll hold.")
+
+    def open_ledger(self) -> None:
+        if getattr(self, "_ledger", None) is None:
+            from hearthsmith.sprite.ledger import Ledger
+            self._ledger = Ledger(on_event=self._ledger_event)
+            # closing hides: the window keeps its tab and scroll for next time
+            self._ledger.connect("delete-event", lambda w, *_: w.hide() or True)
+        x, y = self.get_position()
+        sw, sh = self.sprite_size()
+        self._ledger.show_near(x + sw // 2, y + sh // 2)
+
+    def _ledger_event(self, kind: str, task) -> None:
+        """He notices what you do in his ledger — a short line, no voice, gone in seconds."""
+        if kind == "done":
+            import random
+            self.text, self.instant = random.choice(self.DONE_LINES), True
+        elif kind == "added":
+            self.text, self.instant = f"Noted: {task.title[:60]}", True
+        else:
+            return
+        self.text_until = time.time() + 5
+        self.state, self.frame = ("forge" if kind == "done" else "idle"), 0
 
     # -- talk to him ---------------------------------------------------------------------------
 

@@ -141,3 +141,13 @@ def test_only_his_own_panes_are_his():
     yours = Pane("a", "canora-sync", "/x", "running", "idle", "t")
     his = Pane("b", "worker", "/x", "running", "idle", "t", meta={"owner": "hearthsmith", "role": "impl"})
     assert not yours.mine() and his.mine()
+
+
+def test_edit_and_delete(tmp_path):
+    s = Store(tmp_path / "t.db")
+    t = s.add("hone")
+    s.mark_nagged(t.id)
+    e = s.edit(t.id, title="hone the edge", project="axe", state="done")  # state is not editable
+    assert (e.title, e.project, e.state, e.nag_count) == ("hone the edge", "axe", "open", 1)
+    s.delete(t.id)
+    assert s.get(t.id) is None

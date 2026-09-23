@@ -13,3 +13,9 @@ def test_markdown_import(tmp_path):
     assert s.list("done")[0].title == "buy coal"
     # idempotent
     assert markdown.sync(f, s) == 2 and len(s.list(None)) == 2
+
+
+def test_parse_line_takes_a_time():
+    title, due, project, tags = markdown.parse_line("quench @due(2030-01-02T18:30) +forge #hot #fast")
+    assert (title, project, tags) == ("quench", "forge", "hot,fast")
+    assert due and __import__("datetime").datetime.fromtimestamp(due).hour == 18
